@@ -4,10 +4,13 @@ import co.com.plast_innova.app_plastinnova_backend.modules.material.application.
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.TotalMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.Componente;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.ItemBom;
+import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.UbicacionItem;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem.MATERIA_PRIMA;
 import static co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem.PRODUCTO_TERMINADO;
@@ -57,18 +60,52 @@ class EstructuraMaterialesTest {
     }
 
     @Test
-    void totalizaPorCodigoSinContarLaRaiz() {
-        List<TotalMaterialDTO> totales = estructura.totalizar(List.of(
-                estructura.explotar(PT1, new BigDecimal("10")), estructura.explotar(PT2, new BigDecimal("4"))));
+    void sinExistenciasTotalizaPorCodigoYBodegaSinContarLasRaices() {
+        List<TotalMaterialDTO> totales = estructura.totalizar(Map.of(1, new BigDecimal("10"), 2, new BigDecimal("4")), Map.of());
 
         // Semiterminados primero, luego materia prima; los ítems sin tipo al final
         assertEquals(List.of("LAM/SEMI", "RESINA", "TORNILLO"), totales.stream().map(TotalMaterialDTO::codigo).toList());
         assertEquals(new BigDecimal("24"), totales.get(0).cantidad());   // 20 + 4
+        assertEquals("1A001", totales.get(0).bodega());
         assertTrue(totales.get(0).tieneComponentes());
         assertEquals(new BigDecimal("11"), totales.get(1).cantidad());   // 5 + 5 + 4 × 0.25
+        assertEquals(new BigDecimal("11"), totales.get(1).faltante());
+        assertEquals(new BigDecimal("0"), totales.get(1).disponible());
         assertFalse(totales.get(1).tieneComponentes());
         assertEquals(new BigDecimal("72"), totales.get(2).cantidad());   // 60 + 12
         assertFalse(totales.get(2).enMaestro());
+    }
+
+    @Test
+    void lasExistenciasDeUnSemiterminadoReducenLasDeSusComponentes() {
+        // 15 semiterminados en 1A001 cubren 15 de los 24: solo los 9 que faltan se explotan
+        List<TotalMaterialDTO> totales = estructura.totalizar(Map.of(1, new BigDecimal("10"), 2, new BigDecimal("4")), Map.of(
+                new UbicacionItem(3, "1A001"), new BigDecimal("15"),
+                new UbicacionItem(4, "1A013"), new BigDecimal("3"),
+                new UbicacionItem(4, "1A001"), new BigDecimal("100"),   // otra bodega: no cuenta
+                new UbicacionItem(5, "1A004"), new BigDecimal("50")));
+
+        TotalMaterialDTO semi = totales.get(0);
+        assertEquals(new BigDecimal("24"), semi.cantidad());
+        assertEquals(new BigDecimal("15"), semi.disponible());
+        assertEquals(new BigDecimal("9"), semi.faltante());
+        TotalMaterialDTO resina = totales.get(1);
+        assertEquals(new BigDecimal("7.25"), resina.cantidad());         // 5 (directa de PT1) + 9 × 0.25
+        assertEquals(new BigDecimal("3"), resina.disponible());
+        assertEquals(new BigDecimal("4.25"), resina.faltante());
+        TotalMaterialDTO tornillo = totales.get(2);
+        assertEquals(new BigDecimal("27"), tornillo.cantidad());         // 9 × 3
+        assertEquals(new BigDecimal("0"), tornillo.faltante());
+    }
+
+    @Test
+    void siElSemiterminadoAlcanzaNoSeRequierenSusComponentes() {
+        List<TotalMaterialDTO> totales = estructura.totalizar(Map.of(2, new BigDecimal("4")),
+                Map.of(new UbicacionItem(3, "1A001"), new BigDecimal("4")));
+
+        assertEquals(List.of("LAM/SEMI"), totales.stream().map(TotalMaterialDTO::codigo).toList());
+        assertEquals(new BigDecimal("0"), totales.getFirst().faltante());
+        assertEquals(Set.of(2, 3, 4, 5), estructura.alcanzables(List.of(2)));
     }
 
     @Test

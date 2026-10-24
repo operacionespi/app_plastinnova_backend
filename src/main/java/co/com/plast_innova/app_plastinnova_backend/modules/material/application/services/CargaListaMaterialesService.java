@@ -5,6 +5,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.material.application.
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.CargaListaMateriales;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.repositories.CargaListaMaterialesRepository;
+import co.com.plast_innova.app_plastinnova_backend.shared.csv.LectorCsv;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.FechaUtc;
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.SolicitudInvalidaException;
 import lombok.RequiredArgsConstructor;
@@ -202,7 +203,7 @@ public class CargaListaMaterialesService {
                 revision.error(csv, f, hijo + " está repetido como componente de " + padre + ".");
                 continue;
             }
-            BigDecimal cantidad = decimal(csv.valor(f, "Cantidad_Hijo"));
+            BigDecimal cantidad = LectorCsv.decimal(csv.valor(f, "Cantidad_Hijo"));
             if (cantidad == null || cantidad.signum() <= 0 || cantidad.scale() > 6 || cantidad.precision() - cantidad.scale() > 12) {
                 revision.error(csv, f, "la cantidad '" + csv.valor(f, "Cantidad_Hijo")
                         + "' no es válida (mayor que cero, hasta 6 decimales).");
@@ -383,18 +384,6 @@ public class CargaListaMaterialesService {
         }
         try {
             return Integer.valueOf(valor);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /** Acepta punto decimal; si no hay punto, la coma también (exportes con configuración regional en español). */
-    private static BigDecimal decimal(String valor) {
-        if (valor == null) {
-            return null;
-        }
-        try {
-            return new BigDecimal(valor.contains(".") ? valor : valor.replace(',', '.'));
         } catch (NumberFormatException e) {
             return null;
         }

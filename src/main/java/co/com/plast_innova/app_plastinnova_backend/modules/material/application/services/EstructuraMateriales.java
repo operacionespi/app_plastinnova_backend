@@ -3,9 +3,9 @@ package co.com.plast_innova.app_plastinnova_backend.modules.material.application
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.NodoMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.TotalMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem;
+import co.com.plast_innova.app_plastinnova_backend.shared.domain.Decimales;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Copia en memoria e inmutable de la lista de materiales completa (unas 87 mil relaciones). Explota la estructura de
@@ -22,8 +23,6 @@ import java.util.Optional;
  */
 final class EstructuraMateriales {
 
-    /** Decimales de las cantidades que se entregan (las internas no se redondean). */
-    private static final int DECIMALES = 6;
     /** La carga rechaza los ciclos; esto solo evita un desbordamiento si llegaran a existir. */
     private static final int PROFUNDIDAD_MAXIMA = 50;
 
@@ -70,23 +69,69 @@ final class EstructuraMateriales {
         return nodo(raiz, null, null, null, cantidad, 0);
     }
 
-    /** Suma los componentes de los árboles por código (la raíz de cada árbol no cuenta: es lo que se pide). */
-    List<TotalMaterialDTO> totalizar(Collection<NodoMaterialDTO> arboles) {
-        Map<String, BigDecimal> cantidades = new LinkedHashMap<>();
-        arboles.forEach(arbol -> arbol.componentes().forEach(c -> acumular(c, cantidades)));
-        return cantidades.entrySet().stream()
-                .map(e -> {
-                    ItemBom item = porCodigo.get(clave(e.getKey()));
-                    return new TotalMaterialDTO(item.codigo(), item.descripcion(), item.tipo(), item.unidad(),
-                            item.enMaestro(), redondear(e.getValue()), tieneComponentes(item));
-                })
-                .sorted(Comparator.comparing(TotalMaterialDTO::tipo, ORDEN_TIPO).thenComparing(TotalMaterialDTO::codigo))
+    /** Ítems que aparecen en la estructura de las raíces (incluidas). */
+    Set<Integer> alcanzables(Collection<Integer> raices) {
+        return niveles(raices).keySet();
+    }
+
+    /**
+     * Requerimiento neto por componente y bodega para la demanda de las raíces (ítem → cantidad), descontando las
+     * existencias de la bodega que indica la lista para cada componente. Se recorre por niveles (cada ítem después de
+     * todos los que lo usan): solo lo que falta de un ítem se explota hacia sus componentes, así que si hay
+     * semiterminados en bodega se necesitan menos de sus materias primas. Las raíces no se descuentan (es lo que se
+     * pide) y no aparecen en el resultado, salvo que también sean componente de otra raíz.
+     *
+     * @param existencias cantidad disponible por ítem y código de bodega
+     */
+    List<TotalMaterialDTO> totalizar(Map<Integer, BigDecimal> demanda, Map<UbicacionItem, BigDecimal> existencias) {
+        Map<Integer, Integer> niveles = niveles(demanda.keySet());
+        Map<Integer, Map<String, BigDecimal>> requerido = new HashMap<>();
+        List<TotalMaterialDTO> totales = new ArrayList<>();
+        niveles.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Integer>comparingByValue().thenComparing(Map.Entry.comparingByKey()))
+                .forEach(e -> {
+                    ItemBom item = porId.get(e.getKey());
+                    BigDecimal faltaTotal = demanda.getOrDefault(item.id(), BigDecimal.ZERO);
+                    for (Map.Entry<String, BigDecimal> r : requerido.getOrDefault(item.id(), Map.of()).entrySet()) {
+                        BigDecimal disponible = existencias.getOrDefault(new UbicacionItem(item.id(), r.getKey()), BigDecimal.ZERO);
+                        BigDecimal falta = r.getValue().subtract(disponible).max(BigDecimal.ZERO);
+                        faltaTotal = faltaTotal.add(falta);
+                        totales.add(new TotalMaterialDTO(item.codigo(), item.descripcion(), item.tipo(), item.unidad(),
+                                item.enMaestro(), r.getKey(), redondear(r.getValue()), redondear(disponible),
+                                redondear(falta), tieneComponentes(item)));
+                    }
+                    if (faltaTotal.signum() > 0) {
+                        for (Componente c : componentes.getOrDefault(item.id(), List.of())) {
+                            requerido.computeIfAbsent(c.itemHijoId(), k -> new LinkedHashMap<>())
+                                    .merge(c.bodega(), faltaTotal.multiply(c.cantidad()), BigDecimal::add);
+                        }
+                    }
+                });
+        return totales.stream()
+                .sorted(Comparator.comparing(TotalMaterialDTO::tipo, ORDEN_TIPO)
+                        .thenComparing(TotalMaterialDTO::codigo)
+                        .thenComparing(TotalMaterialDTO::bodega, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
     }
 
-    private void acumular(NodoMaterialDTO nodo, Map<String, BigDecimal> cantidades) {
-        cantidades.merge(nodo.codigo(), nodo.cantidad(), BigDecimal::add);
-        nodo.componentes().forEach(c -> acumular(c, cantidades));
+    /** Ítem en una bodega (código; null si la lista no indica bodega). */
+    record UbicacionItem(int itemId, String bodega) {
+    }
+
+    /** Nivel más profundo en que aparece cada ítem bajo las raíces (nivel 0): define el orden del neteo. */
+    private Map<Integer, Integer> niveles(Collection<Integer> raices) {
+        Map<Integer, Integer> niveles = new HashMap<>();
+        raices.forEach(id -> asignarNivel(id, 0, niveles));
+        return niveles;
+    }
+
+    private void asignarNivel(int itemId, int nivel, Map<Integer, Integer> niveles) {
+        Integer actual = niveles.get(itemId);
+        if ((actual != null && actual >= nivel) || nivel > PROFUNDIDAD_MAXIMA) {
+            return;
+        }
+        niveles.put(itemId, nivel);
+        componentes.getOrDefault(itemId, List.of()).forEach(c -> asignarNivel(c.itemHijoId(), nivel + 1, niveles));
     }
 
     private NodoMaterialDTO nodo(ItemBom item, Integer secuencia, String bodega, BigDecimal cantidadPorPadre,
@@ -103,10 +148,8 @@ final class EstructuraMateriales {
                 hijos);
     }
 
-    /** Sin ceros sobrantes y nunca en notación científica (1E+1), que el JSON mostraría tal cual. */
     static BigDecimal redondear(BigDecimal valor) {
-        BigDecimal r = valor.setScale(DECIMALES, RoundingMode.HALF_UP).stripTrailingZeros();
-        return r.scale() < 0 ? r.setScale(0) : r;
+        return Decimales.paraMostrar(valor);
     }
 
     static String clave(String codigo) {

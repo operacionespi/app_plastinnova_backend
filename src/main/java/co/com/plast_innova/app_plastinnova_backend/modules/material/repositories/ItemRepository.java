@@ -8,8 +8,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
+
 @Repository
 public interface ItemRepository extends JpaRepository<Item, Integer> {
+
+    Optional<Item> findByCodigo(String codigo);
 
     /** Ítems cuyo código o descripción contienen el texto (la intercalación de SQL Server ignora mayúsculas). */
     @Query("""

@@ -1,7 +1,8 @@
-package co.com.plast_innova.app_plastinnova_backend.modules.material.application.services;
+package co.com.plast_innova.app_plastinnova_backend.shared.csv;
 
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.SolicitudInvalidaException;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -18,7 +19,7 @@ import java.util.Map;
  * línea ("" dentro de comillas es una comilla). La primera fila trae los nombres de las columnas. Los valores se
  * devuelven sin los espacios de relleno del ERP.
  */
-final class LectorCsv {
+public final class LectorCsv {
 
     private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
 
@@ -34,7 +35,7 @@ final class LectorCsv {
      * @param archivo nombre que se muestra en los errores, ej. "items.csv"
      * @param columnasRequeridas columnas que debe traer el encabezado (sin importar mayúsculas)
      */
-    static LectorCsv leer(String archivo, byte[] contenido, String... columnasRequeridas) {
+    public static LectorCsv leer(String archivo, byte[] contenido, String... columnasRequeridas) {
         LectorCsv lector = new LectorCsv(archivo);
         List<List<String>> registros = separar(decodificar(contenido));
         if (registros.isEmpty()) {
@@ -59,16 +60,16 @@ final class LectorCsv {
         return lector;
     }
 
-    String archivo() {
+    public String archivo() {
         return archivo;
     }
 
-    int cantidadFilas() {
+    public int cantidadFilas() {
         return filas.size();
     }
 
     /** Valor de la columna en la fila (0 = primera fila de datos); null si viene vacío o la fila es más corta. */
-    String valor(int fila, String columna) {
+    public String valor(int fila, String columna) {
         String[] valores = filas.get(fila);
         int indice = columnas.get(columna.toLowerCase(Locale.ROOT));
         if (indice >= valores.length || valores[indice].isEmpty()) {
@@ -78,8 +79,20 @@ final class LectorCsv {
     }
 
     /** Número de línea del archivo para los mensajes (el encabezado es la línea 1). */
-    static int linea(int fila) {
+    public static int linea(int fila) {
         return fila + 2;
+    }
+
+    /** Número decimal o null si no lo es. Acepta punto; si no hay punto, la coma también (configuración regional en español). */
+    public static BigDecimal decimal(String valor) {
+        if (valor == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(valor.contains(".") ? valor : valor.replace(',', '.'));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** UTF-8 (con o sin BOM); si no es UTF-8 válido, el ERP lo exportó en Windows-1252. */

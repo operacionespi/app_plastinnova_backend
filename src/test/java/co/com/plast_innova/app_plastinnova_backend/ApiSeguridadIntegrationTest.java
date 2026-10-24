@@ -197,10 +197,21 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
         mvc.perform(conToken(get("/api/v1/pedidos/{id}", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/auth/me"), GERENTE))
-                .andExpect(jsonPath("$.permisos", contains("kpi:ver", "material:ver", "pedido:ver")));
+                .andExpect(jsonPath("$.permisos", contains("inventario:ver", "kpi:ver", "material:ver", "pedido:ver")));
         mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), OPERADOR))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(get("/api/v1/inventario/existencias"), GERENTE))
+                .andExpect(status().isOk());
+        mvc.perform(conToken(get("/api/v1/inventario/existencias"), OPERADOR))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(post("/api/v1/inventario/movimientos"), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tipo\": \"ENTRADA\", \"itemCodigo\": \"X\", \"slotDestinoId\": 1, \"cantidad\": 1}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(post("/api/v1/inventario/slots"), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"bodegaId\": 1, \"codigo\": \"X\"}"))
                 .andExpect(status().isForbidden());
 
         mvc.perform(conToken(put("/api/v1/pedidos/{id}/estado", pedidoId), GERENTE)

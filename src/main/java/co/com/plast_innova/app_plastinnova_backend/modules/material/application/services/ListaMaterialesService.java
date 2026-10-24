@@ -1,6 +1,7 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.material.application.services;
 
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoDetalle;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ExistenciaRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.CargaListaMaterialesDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.ItemResumenDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.LineaMaterialesDTO;
@@ -8,6 +9,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.material.application.
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.NodoMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.Componente;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.ItemBom;
+import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.EstructuraMateriales.UbicacionItem;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.CargaListaMateriales;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.repositories.CargaListaMaterialesRepository;
@@ -29,12 +31,14 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * Consultas sobre la lista de materiales: la estructura de un ítem y lo que requiere un pedido. Solo calcula: no crea
- * órdenes ni descuenta inventario. Trabaja sobre una copia en memoria que se recarga después de cada carga de CSV.
+ * Consultas sobre la lista de materiales: la estructura de un ítem y lo que requiere un pedido, neto de existencias.
+ * Solo calcula: no crea órdenes ni reserva o consume inventario. Trabaja sobre una copia en memoria que se recarga después de cada carga de CSV.
  */
 @Slf4j
 @Service
@@ -46,6 +50,9 @@ public class ListaMaterialesService {
     private final CargaListaMaterialesRepository cargaRepository;
     private final PedidoRepository pedidoRepository;
     private final PedidoDetalleRepository pedidoDetalleRepository;
+    private final ExistenciaRepository existenciaRepository;
+
+    private static final int ITEMS_POR_CONSULTA = 2000;
 
     /** null = hay que leerla de la base. Se lee y se invalida bajo el mismo candado (ver invalidar). */
     private volatile EstructuraMateriales estructura;
@@ -90,8 +97,12 @@ public class ListaMaterialesService {
                 })
                 .toList();
 
+        // Cada pedido se calcula por separado: las existencias no se reparten entre los pedidos abiertos
+        Map<Integer, BigDecimal> demanda = new HashMap<>();
+        lineas.stream().filter(l -> l.estructura() != null).forEach(l -> demanda.merge(
+                e.item(l.estructura().codigo()).orElseThrow().id(), BigDecimal.valueOf(l.cantidad()), BigDecimal::add));
         return new MaterialesPedidoDTO(pedido.getId(), pedido.getNumeroPedido(), lineas,
-                e.totalizar(lineas.stream().map(LineaMaterialesDTO::estructura).filter(Objects::nonNull).toList()),
+                e.totalizar(demanda, existencias(e.alcanzables(demanda.keySet()))),
                 cargaRepository.findFirstByOrderByFechaDesc().map(CargaListaMateriales::getFecha).orElse(null));
     }
 
@@ -106,6 +117,17 @@ public class ListaMaterialesService {
     @Transactional(readOnly = true)
     public List<CargaListaMaterialesDTO> ultimasCargas() {
         return cargaRepository.findTop10ByOrderByFechaDesc().stream().map(CargaListaMaterialesDTO::de).toList();
+    }
+
+    /** Existencias por ítem y bodega; en grupos para no pasar el límite de parámetros de SQL Server. */
+    private Map<UbicacionItem, BigDecimal> existencias(Set<Integer> itemIds) {
+        Map<UbicacionItem, BigDecimal> existencias = new HashMap<>();
+        List<Integer> ids = List.copyOf(itemIds);
+        for (int desde = 0; desde < ids.size(); desde += ITEMS_POR_CONSULTA) {
+            existenciaRepository.totalizarPorBodega(ids.subList(desde, Math.min(desde + ITEMS_POR_CONSULTA, ids.size())))
+                    .forEach(x -> existencias.put(new UbicacionItem(x.getItemId(), x.getBodega()), x.getCantidad()));
+        }
+        return existencias;
     }
 
     private EstructuraMateriales estructura() {
