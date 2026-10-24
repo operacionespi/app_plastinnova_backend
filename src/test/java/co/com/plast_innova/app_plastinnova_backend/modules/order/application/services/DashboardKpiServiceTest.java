@@ -1,6 +1,7 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.order.application.services;
 
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoDetalleRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoPedidoRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.FiltroPedidoRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.mapper.PedidoMapper;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.services.impl.DashboardKpiService;
@@ -38,6 +39,7 @@ class DashboardKpiServiceTest {
     @Mock private PedidoRepository pedidoRepository;
     @Mock private PedidoDetalleRepository pedidoDetalleRepository;
     @Mock private EstadoDetalleRepository estadoDetalleRepository;
+    @Mock private EstadoPedidoRepository estadoPedidoRepository;
     @Mock private KpiRepository kpiRepository;
     @Mock private PedidoMapper pedidoMapper;
 

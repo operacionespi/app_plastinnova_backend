@@ -2,6 +2,7 @@ package co.com.plast_innova.app_plastinnova_backend.modules.order.application.se
 
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoDetalleRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoPedidoRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.FiltroPedidoRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.PedidoResumenDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.kpi.KpiLineasPorEstadoDTO;
@@ -56,6 +57,7 @@ public class DashboardKpiService {
     private final PedidoRepository pedidoRepository;
     private final PedidoDetalleRepository pedidoDetalleRepository;
     private final EstadoDetalleRepository estadoDetalleRepository;
+    private final EstadoPedidoRepository estadoPedidoRepository;
     private final KpiRepository kpiRepository;
     private final PedidoMapper pedidoMapper;
 
@@ -72,6 +74,27 @@ public class DashboardKpiService {
 
         LocalDate hoy = LocalDate.now(FechaUtc.ZONA_COLOMBIA);
         return pedidos.map(p -> resumen(p, totales.get(p.getId()), hoy));
+    }
+
+    /**
+     * Pedidos de cada estado con los filtros del listado, menos el de estados: las tarjetas sirven para elegirlo.
+     * Se muestran los estados activos en orden lógico y los inactivos que aún tienen pedidos; con "solo abiertos"
+     * o "solo atrasados" se omiten los estados finales vacíos, que en ese caso nunca tendrían pedidos.
+     */
+    @Transactional(readOnly = true)
+    public List<KpiPedidosPorEstadoDTO> contarPedidosPorEstado(FiltroPedidoRequestDTO filtro) {
+        FiltroPedidoRequestDTO sinEstados = new FiltroPedidoRequestDTO(filtro.numeroPedido(), filtro.clienteId(),
+                filtro.ciudad(), filtro.vendedores(), null, filtro.fechaDesde(), filtro.fechaHasta(),
+                filtro.soloAbiertos(), filtro.soloAtrasados());
+        Map<Integer, Long> conteo = pedidoRepository.contarPorEstado(PedidoSpecification.construirFiltro(sinEstados));
+        boolean soloAbiertos = Boolean.TRUE.equals(filtro.soloAbiertos()) || Boolean.TRUE.equals(filtro.soloAtrasados());
+
+        return estadoPedidoRepository.findAllByOrderByOrdenLogicoAscIdAsc().stream()
+                .filter(e -> conteo.containsKey(e.getId())
+                        || (Boolean.TRUE.equals(e.getActivo()) && !(soloAbiertos && Boolean.TRUE.equals(e.getEsFinal()))))
+                .map(e -> new KpiPedidosPorEstadoDTO(e.getId(), e.getCodigo(), e.getNombre(), e.getColor(),
+                        e.getEsFinal(), conteo.getOrDefault(e.getId(), 0L)))
+                .toList();
     }
 
     @Transactional(readOnly = true)

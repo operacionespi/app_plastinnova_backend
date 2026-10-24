@@ -17,7 +17,8 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PedidoRepository extends JpaRepository<Pedido, Long>, JpaSpecificationExecutor<Pedido> {
+public interface PedidoRepository extends JpaRepository<Pedido, Long>, JpaSpecificationExecutor<Pedido>,
+        PedidoConteoRepository {
 
     // 1. Evitamos N+1 al cargar un pedido con su cliente, estado y ubicación de forma ansiosa en una sola query
     @EntityGraph(attributePaths = {"cliente", "estadoActual", "ciudadEnvio", "ciudadEnvio.pais"})

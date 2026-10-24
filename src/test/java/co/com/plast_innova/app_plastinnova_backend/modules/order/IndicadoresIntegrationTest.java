@@ -34,6 +34,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -303,6 +304,37 @@ class IndicadoresIntegrationTest extends PruebaIntegracion {
         assertThrows(SolicitudInvalidaException.class, () -> kpis.buscarPedidosPaginados(
                 new FiltroPedidoRequestDTO(null, null, null, null, null, null, null, null, null),
                 PageRequest.of(0, 10, Sort.by("usuarioAsignado.passwordHash"))));
+    }
+
+    @Test
+    void conteoPorEstadoAplicaLosFiltrosDelListadoMenosElDeEstados() {
+        Statistics estadisticas = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        estadisticas.clear();
+        Integer creado = jdbc.queryForObject("SELECT id FROM Estado_Pedido WHERE codigo = 'CREADO'", Integer.class);
+
+        // El filtro de estados se ignora; IT-D (CREADO) está eliminado en FileMaker
+        var todos = conteo(new FiltroPedidoRequestDTO(null, null, null, null, List.of(creado), null, null, null, null));
+        assertEquals(2, estadisticas.getPrepareStatementCount()); // catálogo + una consulta agrupada
+        assertEquals(1, todos.get("FACTURADO"));
+        assertEquals(1, todos.get("EN_ALISTAMIENTO"));
+        assertEquals(1, todos.get("CREADO"));
+        assertEquals(0, todos.get("EN_DESPACHOS")); // activo sin pedidos
+
+        var delDia = conteo(new FiltroPedidoRequestDTO(null, null, "cali", null, null, DIA, DIA, null, null));
+        assertEquals(1, delDia.get("FACTURADO"));
+        assertEquals(0, delDia.get("CREADO")); // IT-C es de otro día
+        assertEquals(0, delDia.get("EN_ALISTAMIENTO")); // IT-B es de Lima
+
+        // Solo abiertos: los estados finales vacíos no se muestran
+        var abiertos = conteo(new FiltroPedidoRequestDTO(null, null, null, null, null, null, null, true, null));
+        assertFalse(abiertos.containsKey("FACTURADO"));
+        assertEquals(1, abiertos.get("CREADO"));
+        assertEquals(1, abiertos.get("EN_ALISTAMIENTO"));
+    }
+
+    private Map<String, Long> conteo(FiltroPedidoRequestDTO filtro) {
+        return kpis.contarPedidosPorEstado(filtro).stream()
+                .collect(Collectors.toMap(KpiPedidosPorEstadoDTO::codigo, KpiPedidosPorEstadoDTO::pedidos));
     }
 
     @Test

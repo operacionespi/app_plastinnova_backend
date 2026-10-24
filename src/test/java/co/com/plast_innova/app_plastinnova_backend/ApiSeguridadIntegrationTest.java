@@ -190,6 +190,9 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/dashboard/vendedores"), GERENTE))
                 .andExpect(status().isOk());
+        mvc.perform(conToken(post("/api/v1/dashboard/pedidos/conteo-por-estado"), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/pedidos/{id}", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/auth/me"), GERENTE))

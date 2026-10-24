@@ -52,6 +52,15 @@ public class DashboardController {
         return new PagedModel<>(dashboardKpiService.buscarPedidosPaginados(filtro, pageable));
     }
 
+    @Operation(summary = "Pedidos por estado del listado",
+            description = "Conteo por estado con los mismos filtros del listado, sin el filtro de estados. "
+                    + "Incluye los estados activos aunque no tengan pedidos.")
+    @PostMapping("/pedidos/conteo-por-estado")
+    @PreAuthorize("hasAuthority('pedido:ver')")
+    public List<KpiPedidosPorEstadoDTO> contarPedidosPorEstado(@RequestBody FiltroPedidoRequestDTO filtro) {
+        return dashboardKpiService.contarPedidosPorEstado(filtro);
+    }
+
     @Operation(summary = "Vendedores", description = "Vendedores de los clientes con pedidos activos, para filtrar el listado.")
     @GetMapping("/vendedores")
     @PreAuthorize("hasAuthority('pedido:ver')")
