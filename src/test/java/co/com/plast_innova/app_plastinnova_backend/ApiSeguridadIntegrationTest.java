@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -196,7 +197,11 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
         mvc.perform(conToken(get("/api/v1/pedidos/{id}", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/auth/me"), GERENTE))
-                .andExpect(jsonPath("$.permisos", contains("kpi:ver", "pedido:ver")));
+                .andExpect(jsonPath("$.permisos", contains("kpi:ver", "material:ver", "pedido:ver")));
+        mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), GERENTE))
+                .andExpect(status().isOk());
+        mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), OPERADOR))
+                .andExpect(status().isForbidden());
 
         mvc.perform(conToken(put("/api/v1/pedidos/{id}/estado", pedidoId), GERENTE)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -210,6 +215,10 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"fechaEstimadaEntrega\": \"2030-01-01\"}"))
                 .andExpect(status().isForbidden());
         mvc.perform(conToken(post("/api/v1/sincronizacion/filemaker/ejecuciones"), GERENTE))
+                .andExpect(status().isForbidden());
+        mvc.perform(multipart("/api/v1/materiales/cargas")
+                        .file("bodegas", new byte[0]).file("items", new byte[0]).file("listaMateriales", new byte[0])
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token(GERENTE)))
                 .andExpect(status().isForbidden());
     }
 
