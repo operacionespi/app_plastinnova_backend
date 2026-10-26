@@ -137,7 +137,7 @@ public class RemisionService {
                 }
             }
             return new LineaEntregaDTO(d.getId(), d.getPosicion(), sku(d),
-                    item.map(Item::getDescripcion).orElse(d.getProducto().getNombre()),
+                    item.map(Item::getDescripcion).filter(t -> !t.isBlank()).orElse(d.getProducto().getNombre()),
                     item.map(Item::getUnidad).orElse(null), pedidoMapper.toEstadoResponseDTO(d.getEstadoActual()),
                     d.getCantidadSolicitada(), d.getCantidadEntregada(), d.cantidadPorEntregar(),
                     Decimales.paraMostrar(reservada), Decimales.paraMostrar(libre), maximo, item.isEmpty(),
@@ -275,12 +275,17 @@ public class RemisionService {
                 .sorted(Comparator.comparing((RemisionLinea l) -> l.getPedidoDetalle().getPosicion(),
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(l -> new RemisionLineaDTO(l.getPedidoDetalle().getId(), l.getPedidoDetalle().getPosicion(),
-                        sku(l.getPedidoDetalle()), l.getPedidoDetalle().getProducto().getNombre(), l.getCantidad()))
+                        sku(l.getPedidoDetalle()), descripcion(l.getPedidoDetalle()), l.getCantidad()))
                 .toList();
         return new RemisionDTO(r.getId(), r.getNumero(), p.getId(), p.getNumeroPedido(), p.getCliente().getRazonSocial(),
                 r.getEstado(), r.getTransportador(), r.getPlaca(), r.getObservaciones(), r.getUsuario(), r.getFecha(),
                 r.getUsuarioAnulacion(), r.getFechaAnulacion(), r.getMotivoAnulacion(),
                 lineas.stream().mapToInt(RemisionLineaDTO::cantidad).sum(), lineas);
+    }
+
+    /** La del maestro de ítems; si el producto no está en él, el nombre que llegó de FileMaker. */
+    private String descripcion(PedidoDetalle d) {
+        return item(d).map(Item::getDescripcion).filter(t -> !t.isBlank()).orElse(d.getProducto().getNombre());
     }
 
     private static String motivoCerrado(Pedido pedido) {
