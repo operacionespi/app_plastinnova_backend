@@ -92,8 +92,8 @@ class InventarioIntegrationTest extends PruebaIntegracion {
 
     @AfterEach
     void limpiar() {
-        for (String tabla : List.of("Pedido_Detalle", "Pedido", "Cliente", "Producto", "Movimiento_Inventario", "Existencia",
-                "Slot", "Lista_Material", "Item", "Bodega", "Carga_Lista_Materiales")) {
+        for (String tabla : List.of("Reserva_Inventario", "Movimiento_Inventario", "Pedido_Detalle", "Pedido", "Cliente",
+                "Producto", "Existencia", "Slot", "Lista_Material", "Item", "Bodega", "Carga_Lista_Materiales")) {
             jdbc.update("DELETE FROM " + tabla);
         }
     }

@@ -14,7 +14,8 @@ import org.springframework.stereotype.Repository;
 public interface MovimientoInventarioRepository extends JpaRepository<MovimientoInventario, Long> {
 
     /** Del más reciente al más antiguo; la bodega filtra por origen o destino. */
-    @EntityGraph(attributePaths = {"item", "slotOrigen", "slotOrigen.bodega", "slotDestino", "slotDestino.bodega"})
+    @EntityGraph(attributePaths = {"item", "slotOrigen", "slotOrigen.bodega", "slotDestino", "slotDestino.bodega",
+            "pedidoDetalle", "pedidoDetalle.pedido"})
     @Query("""
             SELECT m FROM MovimientoInventario m LEFT JOIN m.slotOrigen o LEFT JOIN m.slotDestino d
             WHERE (:itemCodigo = '' OR m.item.codigo = :itemCodigo)

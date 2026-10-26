@@ -14,6 +14,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker
 import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker.domain.SyncLog;
 import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker.repositories.SyncControlRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker.repositories.SyncLogRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.ReservaInventarioService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoDetalleRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.ResumenLineaFm;
@@ -80,6 +81,7 @@ public class FileMakerSyncService {
     private final PedidoDetalleRepository detalleRepository;
     private final EstadoPedidoRepository estadoPedidoRepository;
     private final EstadoDetalleRepository estadoDetalleRepository;
+    private final ReservaInventarioService reservas;
     private final TransactionTemplate transactionTemplate;
     private final Executor executor;
     private final String layout;
@@ -104,6 +106,7 @@ public class FileMakerSyncService {
                                 PedidoDetalleRepository detalleRepository,
                                 EstadoPedidoRepository estadoPedidoRepository,
                                 EstadoDetalleRepository estadoDetalleRepository,
+                                ReservaInventarioService reservas,
                                 TransactionTemplate transactionTemplate,
                                 @Qualifier("fileMakerSyncExecutor") Executor executor,
                                 @Value("${app.filemaker.sync.layout}") String layout,
@@ -121,6 +124,7 @@ public class FileMakerSyncService {
         this.detalleRepository = detalleRepository;
         this.estadoPedidoRepository = estadoPedidoRepository;
         this.estadoDetalleRepository = estadoDetalleRepository;
+        this.reservas = reservas;
         this.transactionTemplate = transactionTemplate;
         this.executor = executor;
         this.layout = layout;
@@ -402,6 +406,7 @@ public class FileMakerSyncService {
                         desaparecidas.subList(i, Math.min(i + LOTE_ELIMINADAS, desaparecidas.size())), ahora);
             }
             pedidoRepository.marcarEliminadosSinLineasActivas(ahora);
+            reservas.liberarLineasEliminadas();
             return marcadas;
         });
         return total != null ? total : 0;

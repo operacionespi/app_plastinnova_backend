@@ -213,6 +213,13 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
         mvc.perform(conToken(post("/api/v1/inventario/slots"), GERENTE)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"bodegaId\": 1, \"codigo\": \"X\"}"))
                 .andExpect(status().isForbidden());
+        mvc.perform(conToken(get("/api/v1/pedidos/{id}/reservas", pedidoId), OPERADOR))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(post("/api/v1/pedidos/{id}/reservas/comprometer", pedidoId), GERENTE))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(put("/api/v1/pedidos/{id}/reservas/{detalleId}", pedidoId, detalleId), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"cantidad\": 1}"))
+                .andExpect(status().isForbidden());
 
         mvc.perform(conToken(put("/api/v1/pedidos/{id}/estado", pedidoId), GERENTE)
                         .contentType(MediaType.APPLICATION_JSON)

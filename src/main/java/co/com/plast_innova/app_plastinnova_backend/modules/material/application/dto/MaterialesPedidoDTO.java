@@ -5,7 +5,8 @@ import java.util.List;
 
 /**
  * Materiales que requiere un pedido: la estructura de cada línea vigente (sin las eliminadas en FileMaker ni las que
- * no salen) para su cantidad solicitada, y los totales por componente. No descuenta inventario.
+ * no salen) para su cantidad solicitada, y los totales por componente: lo que falta después de lo comprometido del
+ * producto terminado y de las existencias de cada componente. No descuenta inventario.
  */
 public record MaterialesPedidoDTO(
         Long pedidoId,

@@ -38,6 +38,18 @@ public interface ExistenciaRepository extends JpaRepository<Existencia, Long> {
 
     boolean existsBySlotIdAndCantidadGreaterThan(Integer slotId, BigDecimal cantidad);
 
+    /** Existencia total del ítem en la bodega (todos sus slots). */
+    @Query("SELECT COALESCE(SUM(e.cantidad), 0) FROM Existencia e WHERE e.item.id = :itemId AND e.slot.bodega.id = :bodegaId")
+    BigDecimal totalEnBodega(@Param("itemId") Integer itemId, @Param("bodegaId") Integer bodegaId);
+
+    /** Saldos del ítem en los slots de la bodega, bloqueados, del mayor al menor: de ellos sale un despacho. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT e FROM Existencia e JOIN FETCH e.slot s JOIN FETCH s.bodega
+            WHERE e.item.id = :itemId AND s.bodega.id = :bodegaId AND e.cantidad > 0
+            ORDER BY e.cantidad DESC, s.codigo""")
+    List<Existencia> bloquearEnBodega(@Param("itemId") Integer itemId, @Param("bodegaId") Integer bodegaId);
+
     /** Total de cada ítem por bodega (sumando sus slots), para el requerimiento neto. */
     @Query("""
             SELECT e.item.id AS itemId, s.bodega.codigo AS bodega, SUM(e.cantidad) AS cantidad

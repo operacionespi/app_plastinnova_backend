@@ -8,6 +8,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.Estado
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoPedido;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoDetalleRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoPedidoRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.ReservaInventarioService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoDetalleRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoPedidoRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CorreccionCantidadRequestDTO;
@@ -68,6 +69,7 @@ public class PedidoServiceImpl implements PedidoService {
     private final UsuarioRepository usuarioRepository;
     private final AuditoriaLogRepository auditoriaRepository;
     private final PedidoMapper pedidoMapper;
+    private final ReservaInventarioService reservas;
 
     @Override
     @Transactional(readOnly = true)
@@ -93,6 +95,7 @@ public class PedidoServiceImpl implements PedidoService {
         pedido.setEstadoActual(nuevoEstado);
         if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
             pedido.setFechaCierre(FechaUtc.ahora());
+            reservas.liberarPedido(pedido.getId());
         } else if (Boolean.TRUE.equals(estadoAnterior.getEsFinal())) {
             // Reapertura (solo posible si se configuró una transición que sale del estado final)
             pedido.setFechaCierre(null);
@@ -181,6 +184,12 @@ public class PedidoServiceImpl implements PedidoService {
                 .observaciones(request.observaciones())
                 .build());
 
+        // Entregada: lo que tenía comprometido sale de la bodega de producto terminado
+        if (EstadoDetalle.CODIGO_NO_SALE.equals(nuevoEstado.getCodigo())) {
+            reservas.liberarLinea(detalle.getId());
+        } else if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
+            reservas.despachar(detalle, request.cantidadProcesada(), emailOperador);
+        }
         return pedidoMapper.toDetalleResponseDTO(detalle);
     }
 
@@ -251,6 +260,7 @@ public class PedidoServiceImpl implements PedidoService {
 
         detalle.setEstadoActual(noSale);
         pedidoDetalleRepository.saveAndFlush(detalle); // el conteo de abajo debe ver esta línea ya en No sale
+        reservas.liberarLinea(detalle.getId());
         historialDetalleRepository.save(HistorialEstadoDetalle.builder()
                 .pedidoDetalle(detalle)
                 .estadoAnterior(actual)

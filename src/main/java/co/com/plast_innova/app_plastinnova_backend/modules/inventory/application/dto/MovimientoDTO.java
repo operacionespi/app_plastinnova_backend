@@ -24,13 +24,18 @@ public record MovimientoDTO(
         String motivo,
         String observaciones,
         String usuario,
-        LocalDateTime fecha
+        LocalDateTime fecha,
+        /** Solo en las salidas por despacho: el pedido de la línea despachada. */
+        Long pedidoId,
+        String numeroPedido
 ) {
     public static MovimientoDTO de(MovimientoInventario m) {
         return new MovimientoDTO(m.getId(), m.getTipo(), m.getItem().getCodigo(), m.getItem().getDescripcion(),
                 m.getItem().getUnidad(), ubicacion(m.getSlotOrigen()), ubicacion(m.getSlotDestino()),
                 Decimales.paraMostrar(m.getCantidad()), Decimales.paraMostrar(m.getCantidadContada()), m.getMotivo(),
-                m.getObservaciones(), m.getUsuario(), m.getFecha());
+                m.getObservaciones(), m.getUsuario(), m.getFecha(),
+                m.getPedidoDetalle() == null ? null : m.getPedidoDetalle().getPedido().getId(),
+                m.getPedidoDetalle() == null ? null : m.getPedidoDetalle().getPedido().getNumeroPedido());
     }
 
     private static String ubicacion(Slot slot) {

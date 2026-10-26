@@ -6,6 +6,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.catalog.application.s
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.application.services.GestionEstadosPedidoService;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoPedido;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.ReservaInventarioService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoDetalleRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoPedidoRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CorreccionCantidadRequestDTO;
@@ -61,6 +62,7 @@ class PedidoServiceTest {
     @Mock private GestionEstadosDetalleService estadosDetalle;
     @Mock private UsuarioRepository usuarioRepository;
     @Mock private PedidoMapper pedidoMapper;
+    @Mock private ReservaInventarioService reservas;
 
     @InjectMocks
     private PedidoServiceImpl pedidoService;
@@ -125,6 +127,8 @@ class PedidoServiceTest {
         pedidoService.transicionarEstadoPedido(100L, new CambioEstadoPedidoRequestDTO(5, null), EMAIL);
 
         assertNotNull(pedido.getFechaCierre());
+        // Lo que el pedido tuviera comprometido vuelve a quedar libre
+        verify(reservas).liberarPedido(100L);
     }
 
     @Test

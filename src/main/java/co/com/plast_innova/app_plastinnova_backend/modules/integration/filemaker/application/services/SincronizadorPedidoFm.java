@@ -12,6 +12,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.geography.repositorie
 import co.com.plast_innova.app_plastinnova_backend.modules.geography.repositories.PaisRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker.application.dto.FilaPedidoFm;
 import co.com.plast_innova.app_plastinnova_backend.modules.integration.filemaker.application.services.CatalogoEstados.Resolucion;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.ReservaInventarioService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.HistorialEstadoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.HistorialEstadoPedido;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.Pedido;
@@ -66,6 +67,7 @@ public class SincronizadorPedidoFm {
     private final ProductoRepository productoRepository;
     private final PaisRepository paisRepository;
     private final CiudadRepository ciudadRepository;
+    private final ReservaInventarioService reservas;
 
     @Transactional
     public Resultado sincronizar(String numeroPedido, List<FilaPedidoFm> filas, CatalogoEstados estados) {
@@ -132,6 +134,7 @@ public class SincronizadorPedidoFm {
             } else if (!fila.huella().equals(detalle.getHuellaFm()) || detalle.getEliminadoEnFm()
                     || !Objects.equals(detalle.getPedido().getId(), pedido.getId())) {
                 aplicarCampos(detalle, pedido, fila, productos);
+                reservas.ajustarACantidad(detalle);
                 actualizadas++;
             }
         }

@@ -2,6 +2,7 @@ package co.com.plast_innova.app_plastinnova_backend.modules.material.application
 
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ExistenciaRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ReservaInventarioRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.CargaListaMaterialesDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.ItemResumenDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.LineaMaterialesDTO;
@@ -38,7 +39,8 @@ import java.util.Set;
 
 /**
  * Consultas sobre la lista de materiales: la estructura de un ítem y lo que requiere un pedido, neto de existencias.
- * Solo calcula: no crea órdenes ni reserva o consume inventario. Trabaja sobre una copia en memoria que se recarga después de cada carga de CSV.
+ * Solo calcula: no crea órdenes ni reserva o consume inventario (eso lo hace ReservaInventarioService). Trabaja sobre
+ * una copia en memoria que se recarga después de cada carga de CSV.
  */
 @Slf4j
 @Service
@@ -51,6 +53,7 @@ public class ListaMaterialesService {
     private final PedidoRepository pedidoRepository;
     private final PedidoDetalleRepository pedidoDetalleRepository;
     private final ExistenciaRepository existenciaRepository;
+    private final ReservaInventarioRepository reservaRepository;
 
     private static final int ITEMS_POR_CONSULTA = 2000;
 
@@ -82,6 +85,9 @@ public class ListaMaterialesService {
         Pedido pedido = pedidoRepository.findById(pedidoId)
                 .orElseThrow(() -> new ResourceNotFoundException("El pedido " + pedidoId + " no existe."));
         EstructuraMateriales e = estructura();
+        Map<Long, BigDecimal> reservas = new HashMap<>();
+        reservaRepository.findByPedidoDetallePedidoId(pedidoId)
+                .forEach(r -> reservas.put(r.getPedidoDetalle().getId(), r.getCantidad()));
 
         List<LineaMaterialesDTO> lineas = pedidoDetalleRepository.findByPedidoIdAndEliminadoEnFmFalse(pedidoId).stream()
                 .filter(d -> !EstadoDetalle.CODIGO_NO_SALE.equals(d.getEstadoActual().getCodigo()))
@@ -93,14 +99,17 @@ public class ListaMaterialesService {
                             .map(item -> e.explotar(item, BigDecimal.valueOf(d.getCantidadSolicitada())))
                             .orElse(null);
                     return new LineaMaterialesDTO(d.getId(), d.getPosicion(), sku, d.getProducto().getNombre(),
-                            d.getCantidadSolicitada(), arbol);
+                            d.getCantidadSolicitada(),
+                            EstructuraMateriales.redondear(reservas.getOrDefault(d.getId(), BigDecimal.ZERO)), arbol);
                 })
                 .toList();
 
-        // Cada pedido se calcula por separado: las existencias no se reparten entre los pedidos abiertos
+        // Del producto terminado solo se fabrica lo que no está comprometido de la bodega. Los componentes se calculan
+        // para cada pedido por separado: sus existencias no se reparten entre los pedidos abiertos
         Map<Integer, BigDecimal> demanda = new HashMap<>();
         lineas.stream().filter(l -> l.estructura() != null).forEach(l -> demanda.merge(
-                e.item(l.estructura().codigo()).orElseThrow().id(), BigDecimal.valueOf(l.cantidad()), BigDecimal::add));
+                e.item(l.estructura().codigo()).orElseThrow().id(),
+                BigDecimal.valueOf(l.cantidad()).subtract(l.reservada()).max(BigDecimal.ZERO), BigDecimal::add));
         return new MaterialesPedidoDTO(pedido.getId(), pedido.getNumeroPedido(), lineas,
                 e.totalizar(demanda, existencias(e.alcanzables(demanda.keySet()))),
                 cargaRepository.findFirstByOrderByFechaDesc().map(CargaListaMateriales::getFecha).orElse(null));
@@ -119,13 +128,20 @@ public class ListaMaterialesService {
         return cargaRepository.findTop10ByOrderByFechaDesc().stream().map(CargaListaMaterialesDTO::de).toList();
     }
 
-    /** Existencias por ítem y bodega; en grupos para no pasar el límite de parámetros de SQL Server. */
+    /**
+     * Existencias por ítem y bodega, sin lo comprometido por los pedidos; en grupos para no pasar el límite de
+     * parámetros de SQL Server.
+     */
     private Map<UbicacionItem, BigDecimal> existencias(Set<Integer> itemIds) {
         Map<UbicacionItem, BigDecimal> existencias = new HashMap<>();
         List<Integer> ids = List.copyOf(itemIds);
         for (int desde = 0; desde < ids.size(); desde += ITEMS_POR_CONSULTA) {
-            existenciaRepository.totalizarPorBodega(ids.subList(desde, Math.min(desde + ITEMS_POR_CONSULTA, ids.size())))
+            List<Integer> grupo = ids.subList(desde, Math.min(desde + ITEMS_POR_CONSULTA, ids.size()));
+            existenciaRepository.totalizarPorBodega(grupo)
                     .forEach(x -> existencias.put(new UbicacionItem(x.getItemId(), x.getBodega()), x.getCantidad()));
+            reservaRepository.totalizarPorBodega(grupo).forEach(x -> existencias.computeIfPresent(
+                    new UbicacionItem(x.getItemId(), x.getBodega()),
+                    (k, cantidad) -> cantidad.subtract(x.getCantidad()).max(BigDecimal.ZERO)));
         }
         return existencias;
     }

@@ -1,6 +1,7 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain;
 
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Item;
+import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.PedidoDetalle;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -71,4 +72,9 @@ public class MovimientoInventario {
 
     @Column(name = "fecha", nullable = false)
     private LocalDateTime fecha;
+
+    /** Línea de pedido despachada; solo en las salidas por despacho. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pedido_detalle_id")
+    private PedidoDetalle pedidoDetalle;
 }

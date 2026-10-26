@@ -9,9 +9,12 @@ import co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain.Slot
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain.TipoMovimientoInventario;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ExistenciaRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.MovimientoInventarioRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ReservaInventarioRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.SlotRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Bodega;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Item;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.repositories.ItemRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.PedidoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.Decimales;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.FechaUtc;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.Texto;
@@ -41,6 +44,7 @@ public class InventarioService {
     private final MovimientoInventarioRepository movimientoRepository;
     private final SlotRepository slotRepository;
     private final ItemRepository itemRepository;
+    private final ReservaInventarioRepository reservaRepository;
 
     @Transactional(readOnly = true)
     public Page<ExistenciaDTO> existencias(String texto, Integer bodegaId, Pageable pageable) {
@@ -114,10 +118,29 @@ public class InventarioService {
         return Optional.of(mover(tipo, item, origen, destino, diferencia.abs(), contada, motivo, observaciones, usuario));
     }
 
+    /**
+     * Salida de lo despachado a una línea de pedido. Quien la llama ya bloqueó el ítem y liberó la reserva de la línea
+     * (ver ReservaInventarioService.despachar).
+     */
+    MovimientoInventario despachar(Item item, Slot origen, BigDecimal cantidad, PedidoDetalle detalle, String usuario) {
+        return mover(TipoMovimientoInventario.SALIDA, item, origen, null, cantidad, null, "Despacho",
+                "Pedido " + detalle.getPedido().getNumeroPedido() + ", línea " + detalle.getPosicion(), usuario, detalle);
+    }
+
     private MovimientoInventario mover(TipoMovimientoInventario tipo, Item item, Slot origen, Slot destino,
                                        BigDecimal cantidad, BigDecimal contada, String motivo, String observaciones,
                                        String usuario) {
+        return mover(tipo, item, origen, destino, cantidad, contada, motivo, observaciones, usuario, null);
+    }
+
+    private MovimientoInventario mover(TipoMovimientoInventario tipo, Item item, Slot origen, Slot destino,
+                                       BigDecimal cantidad, BigDecimal contada, String motivo, String observaciones,
+                                       String usuario, PedidoDetalle detalle) {
         LocalDateTime ahora = FechaUtc.ahora();
+        // Un despacho saca lo que la línea tenía comprometido (su reserva ya se liberó)
+        if (detalle == null && sacaDeLaBodega(tipo, origen, destino)) {
+            respetarReservas(item, origen.getBodega(), cantidad);
+        }
         if (origen != null) {
             Existencia existencia = existenciaRepository.bloquear(item.getId(), origen.getId()).orElse(null);
             BigDecimal saldo = existencia == null ? BigDecimal.ZERO : existencia.getCantidad();
@@ -156,7 +179,32 @@ public class InventarioService {
                 .observaciones(observaciones)
                 .usuario(usuario)
                 .fecha(ahora)
+                .pedidoDetalle(detalle)
                 .build());
+    }
+
+    /**
+     * Las salidas y los traslados a otra bodega no pueden tomar lo que los pedidos tienen comprometido. Los ajustes
+     * por conteo sí lo afectan: registran lo que hay físicamente.
+     */
+    private static boolean sacaDeLaBodega(TipoMovimientoInventario tipo, Slot origen, Slot destino) {
+        return (tipo == TipoMovimientoInventario.SALIDA || tipo == TipoMovimientoInventario.TRASLADO)
+                && (destino == null || !destino.getBodega().getId().equals(origen.getBodega().getId()));
+    }
+
+    private void respetarReservas(Item item, Bodega bodega, BigDecimal cantidad) {
+        // El bloqueo del ítem va antes que el de los saldos, en el mismo orden que al reservar y despachar
+        itemRepository.bloquear(item.getId());
+        BigDecimal reservado = reservaRepository.totalReservado(item.getId(), bodega.getId(), null);
+        if (reservado.signum() == 0) {
+            return;
+        }
+        BigDecimal libre = existenciaRepository.totalEnBodega(item.getId(), bodega.getId()).subtract(reservado);
+        if (libre.compareTo(cantidad) < 0) {
+            throw new BusinessRuleException("Hay " + Decimales.paraMostrar(reservado) + " de " + item.getCodigo()
+                    + " comprometidas para pedidos en " + bodega.getCodigo() + ": solo se pueden sacar "
+                    + Decimales.paraMostrar(libre.max(BigDecimal.ZERO)) + ".");
+        }
     }
 
     private Slot slot(Integer id, String rol) {
