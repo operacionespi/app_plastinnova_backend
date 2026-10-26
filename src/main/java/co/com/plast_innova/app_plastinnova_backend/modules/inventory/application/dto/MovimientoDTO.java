@@ -25,9 +25,15 @@ public record MovimientoDTO(
         String observaciones,
         String usuario,
         LocalDateTime fecha,
-        /** Solo en las salidas por despacho: el pedido de la línea despachada. */
+        /** Movimientos de una línea de pedido (despacho, entrega, producción): su pedido. */
         Long pedidoId,
-        String numeroPedido
+        String numeroPedido,
+        /** Entrada de lo producido o consumo de componentes de una orden de producción. */
+        Long ordenProduccionId,
+        String numeroOrdenProduccion,
+        /** Entrega con remisión, o devolución al anularla. */
+        Long remisionId,
+        String numeroRemision
 ) {
     public static MovimientoDTO de(MovimientoInventario m) {
         return new MovimientoDTO(m.getId(), m.getTipo(), m.getItem().getCodigo(), m.getItem().getDescripcion(),
@@ -35,7 +41,11 @@ public record MovimientoDTO(
                 Decimales.paraMostrar(m.getCantidad()), Decimales.paraMostrar(m.getCantidadContada()), m.getMotivo(),
                 m.getObservaciones(), m.getUsuario(), m.getFecha(),
                 m.getPedidoDetalle() == null ? null : m.getPedidoDetalle().getPedido().getId(),
-                m.getPedidoDetalle() == null ? null : m.getPedidoDetalle().getPedido().getNumeroPedido());
+                m.getPedidoDetalle() == null ? null : m.getPedidoDetalle().getPedido().getNumeroPedido(),
+                m.getOrdenProduccion() == null ? null : m.getOrdenProduccion().getId(),
+                m.getOrdenProduccion() == null ? null : m.getOrdenProduccion().getNumero(),
+                m.getRemision() == null ? null : m.getRemision().getId(),
+                m.getRemision() == null ? null : m.getRemision().getNumero());
     }
 
     private static String ubicacion(Slot slot) {

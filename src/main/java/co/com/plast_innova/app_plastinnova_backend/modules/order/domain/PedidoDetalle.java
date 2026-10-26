@@ -76,6 +76,10 @@ public class PedidoDetalle extends EntidadAuditable {
     @Column(name = "avance_reportado", nullable = false)
     private Boolean avanceReportado = false;
 
+    /** Suma de las remisiones vigentes de la línea. */
+    @Column(name = "cantidad_entregada", nullable = false)
+    private Integer cantidadEntregada = 0;
+
     // FileMaker no envía precio: queda en 0 hasta que se defina una fuente
     @Column(name = "precio_unitario", nullable = false, precision = 18, scale = 2)
     private BigDecimal precioUnitario = BigDecimal.ZERO;
@@ -105,6 +109,11 @@ public class PedidoDetalle extends EntidadAuditable {
         return Boolean.TRUE.equals(avanceReportado)
                 ? Math.min(cantidadProcesada, cantidadSolicitada)
                 : cantidadSolicitada;
+    }
+
+    /** Piezas que faltan por entregar con remisiones. */
+    public int cantidadPorEntregar() {
+        return Math.max(cantidadSolicitada - cantidadEntregada, 0);
     }
 
     /** Bloqueo optimista: evita que dos operadores reporten avance sobre la misma línea a la vez. */

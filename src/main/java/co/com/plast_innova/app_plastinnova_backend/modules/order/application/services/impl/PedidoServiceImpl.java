@@ -30,6 +30,8 @@ import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.Hi
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.HistorialEstadoPedidoRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoDetalleRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.domain.OrdenProduccionLinea;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.repositories.OrdenProduccionLineaRepository;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.AuditoriaLog;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.FechaUtc;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.OrigenCambio;
@@ -52,6 +54,8 @@ import java.util.Optional;
  *   <li>No se modifican pedidos ni líneas eliminados en FileMaker.</li>
  *   <li>Al entrar a un estado final se registra la fecha de cierre del pedido; si sale de él, se borra.</li>
  *   <li>La cantidad procesada de una línea no puede superar la cantidad solicitada.</li>
+ *   <li>Una línea que sigue a una orden de producción avanza con ella, no por separado.</li>
+ *   <li>Las líneas llegan a Entregado con las remisiones, no con un cambio de estado.</li>
  *   <li>La fecha estimada de entrega no cambia en pedidos cerrados (protege el indicador de cumplimiento).</li>
  * </ul>
  */
@@ -72,6 +76,7 @@ public class PedidoServiceImpl implements PedidoService {
     private final PedidoMapper pedidoMapper;
     private final ReservaInventarioService reservas;
     private final AlmacenProductoTerminado almacen;
+    private final OrdenProduccionLineaRepository ordenLineaRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -168,8 +173,14 @@ public class PedidoServiceImpl implements PedidoService {
                     + ". Si llegaron más, un supervisor debe corregir la cantidad de la etapa anterior.");
         }
 
+        validarSinOrdenActiva(detalle);
+
         EstadoDetalle estadoAnterior = detalle.getEstadoActual();
         EstadoDetalle nuevoEstado = estadosDetalle.validarTransicion(estadoAnterior, request.nuevoEstadoId());
+        if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
+            throw new BusinessRuleException("La línea pasa a " + nuevoEstado.getNombre()
+                    + " cuando sus remisiones completan lo solicitado: registre la entrega en las entregas del pedido.");
+        }
         Usuario usuario = obtenerUsuarioActivo(emailOperador);
 
         detalle.setEstadoActual(nuevoEstado);
@@ -187,12 +198,8 @@ public class PedidoServiceImpl implements PedidoService {
                 .observaciones(request.observaciones())
                 .build());
 
-        // Lo producido entra a la bodega de producto terminado comprometido para la línea; al entregarla, sale
-        if (EstadoDetalle.CODIGO_NO_SALE.equals(nuevoEstado.getCodigo())) {
-            reservas.liberarLinea(detalle.getId());
-        } else if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
-            reservas.despachar(detalle, request.cantidadProcesada(), emailOperador);
-        } else if (almacen.esRecepcion(nuevoEstado.getCodigo()) && !almacen.esRecepcion(estadoAnterior.getCodigo())) {
+        // Lo producido entra a la bodega de producto terminado comprometido para la línea; sale con sus remisiones
+        if (almacen.esRecepcion(nuevoEstado.getCodigo()) && !almacen.esRecepcion(estadoAnterior.getCodigo())) {
             reservas.recibirProduccion(detalle, request.cantidadProcesada(), emailOperador);
         }
         return pedidoMapper.toDetalleResponseDTO(detalle);
@@ -207,6 +214,7 @@ public class PedidoServiceImpl implements PedidoService {
         if (!Boolean.TRUE.equals(detalle.getAvanceReportado())) {
             throw new BusinessRuleException("La línea aún no tiene piezas reportadas: no hay nada que corregir.");
         }
+        validarSinOrdenActiva(detalle);
         int anterior = detalle.getCantidadProcesada();
         int nueva = request.cantidadProcesada();
         if (nueva > detalle.getCantidadSolicitada()) {
@@ -221,6 +229,12 @@ public class PedidoServiceImpl implements PedidoService {
         detalle.setCantidadProcesada(nueva);
         pedidoDetalleRepository.save(detalle);
         if (almacen.esRecepcion(detalle.getEstadoActual().getCodigo())) {
+            // Lo que produjo una orden ya consumió sus materiales: se corrige con un ajuste de inventario
+            Optional<OrdenProduccionLinea> orden = ordenLineaRepository.findFirstByPedidoDetalleIdOrderByIdDesc(detalleId);
+            if (orden.isPresent()) {
+                throw new BusinessRuleException("Lo producido para la línea lo registró la orden "
+                        + orden.get().getOrden().getNumero() + ": corrija la existencia con un ajuste de inventario.");
+            }
             reservas.corregirProduccion(detalle, anterior, nueva, emailUsuario);
         }
 
@@ -269,6 +283,8 @@ public class PedidoServiceImpl implements PedidoService {
         detalle.setEstadoActual(noSale);
         pedidoDetalleRepository.saveAndFlush(detalle); // el conteo de abajo debe ver esta línea ya en No sale
         reservas.liberarLinea(detalle.getId());
+        // Deja de seguir a su orden de producción: lo que se produzca queda libre
+        ordenLineaRepository.findByPedidoDetalleIdAndActivaTrue(detalleId).ifPresent(l -> l.setActiva(false));
         historialDetalleRepository.save(HistorialEstadoDetalle.builder()
                 .pedidoDetalle(detalle)
                 .estadoAnterior(actual)
@@ -368,6 +384,13 @@ public class PedidoServiceImpl implements PedidoService {
 
     private static String recortar(String texto) {
         return texto.length() <= 500 ? texto : texto.substring(0, 499) + "…";
+    }
+
+    private void validarSinOrdenActiva(PedidoDetalle detalle) {
+        ordenLineaRepository.findByPedidoDetalleIdAndActivaTrue(detalle.getId()).ifPresent(l -> {
+            throw new BusinessRuleException("La línea sigue a la orden de producción " + l.getOrden().getNumero()
+                    + ": reporte el avance en la orden.");
+        });
     }
 
     private static void validarLineaVigente(PedidoDetalle detalle, String operacion) {

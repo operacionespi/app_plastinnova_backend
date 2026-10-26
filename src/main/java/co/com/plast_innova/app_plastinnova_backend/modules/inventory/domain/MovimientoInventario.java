@@ -1,7 +1,9 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain;
 
+import co.com.plast_innova.app_plastinnova_backend.modules.delivery.domain.Remision;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Item;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.PedidoDetalle;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.domain.OrdenProduccion;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -73,8 +75,18 @@ public class MovimientoInventario {
     @Column(name = "fecha", nullable = false)
     private LocalDateTime fecha;
 
-    /** Línea de pedido despachada; solo en las salidas por despacho. */
+    /** Línea de pedido despachada, o para la que se produjo. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "pedido_detalle_id")
     private PedidoDetalle pedidoDetalle;
+
+    /** Orden de producción: entrada de lo producido o consumo de sus componentes. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "orden_produccion_id")
+    private OrdenProduccion ordenProduccion;
+
+    /** Remisión que entregó (salida) o cuya anulación devolvió (entrada) el producto. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "remision_id")
+    private Remision remision;
 }

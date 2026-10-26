@@ -36,6 +36,11 @@ public class AlmacenProductoTerminado {
         return codigo;
     }
 
+    /** Código de la etapa en que lo producido llega a la bodega. */
+    public String codigoEstadoRecepcion() {
+        return estadoRecepcion;
+    }
+
     /** La línea entra a la etapa en que lo producido llega a la bodega (Almacén 1). */
     public boolean esRecepcion(String codigoEstado) {
         return estadoRecepcion.equalsIgnoreCase(codigoEstado);
@@ -47,8 +52,8 @@ public class AlmacenProductoTerminado {
                 "La bodega de producto terminado " + codigo + " no existe: cargue la lista de materiales."));
     }
 
-    /** Slot donde entra lo producido; se crea la primera vez que se necesita. */
-    Slot slotRecepcion(Bodega bodega) {
+    /** Slot de la bodega donde entra lo producido; se crea la primera vez que se necesita. */
+    public Slot slotRecepcion(Bodega bodega) {
         return slotRepository.findByBodegaIdAndCodigo(bodega.getId(), slotRecepcion).orElseGet(() -> {
             Slot nuevo = new Slot();
             nuevo.setBodega(bodega);

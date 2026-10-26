@@ -7,6 +7,8 @@ import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.Pedido;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.PedidoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.infrastructure.specification.PedidoDetalleSpecification;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoDetalleRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.repositories.OrdenProduccionLineaRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.repositories.OrdenProduccionLineaRepository.OrdenDeLinea;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.FechaUtc;
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.SolicitudInvalidaException;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Cola de trabajo del operador: líneas pendientes de varios pedidos, filtradas por la etapa elegida en la tablet. */
 @Service
@@ -36,16 +39,20 @@ public class ColaTrabajoService {
 
     private final PedidoDetalleRepository detalleRepository;
     private final PedidoMapper pedidoMapper;
+    private final OrdenProduccionLineaRepository ordenLineaRepository;
 
     /** Una consulta por página (más el conteo): línea con su pedido, cliente, producto y estado. */
     @Transactional(readOnly = true)
     public Page<LineaColaDTO> buscar(FiltroLineaRequestDTO filtro, Pageable pageable) {
         LocalDate hoy = LocalDate.now(FechaUtc.ZONA_COLOMBIA);
-        return detalleRepository.findAll(PedidoDetalleSpecification.colaDeTrabajo(filtro), conOrdenValido(pageable))
-                .map(d -> aDto(d, hoy));
+        Page<PedidoDetalle> pagina = detalleRepository.findAll(PedidoDetalleSpecification.colaDeTrabajo(filtro),
+                conOrdenValido(pageable));
+        Map<Long, OrdenDeLinea> ordenes = ordenLineaRepository.activasDe(pagina.map(PedidoDetalle::getId).getContent())
+                .stream().collect(Collectors.toMap(OrdenDeLinea::getDetalleId, o -> o));
+        return pagina.map(d -> aDto(d, hoy, ordenes.get(d.getId())));
     }
 
-    private LineaColaDTO aDto(PedidoDetalle d, LocalDate hoy) {
+    private LineaColaDTO aDto(PedidoDetalle d, LocalDate hoy, OrdenDeLinea orden) {
         Pedido p = d.getPedido();
         return new LineaColaDTO(
                 d.getId(),
@@ -64,7 +71,9 @@ public class ColaTrabajoService {
                 d.getEsAnexo(),
                 d.getFechaCreacionFm(),
                 p.getFechaEstimadaEntrega(),
-                p.estaAtrasado(hoy));
+                p.estaAtrasado(hoy),
+                orden == null ? null : orden.getNumero(),
+                orden == null ? null : orden.getOrdenId());
     }
 
     private static Pageable conOrdenValido(Pageable pageable) {

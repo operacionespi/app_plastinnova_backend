@@ -19,4 +19,9 @@ public interface HistorialEstadoDetalleRepository extends JpaRepository<Historia
     /** Último movimiento de un tipo (ej. la marca de No sale, para saber a qué etapa se devuelve). */
     Optional<HistorialEstadoDetalle> findFirstByPedidoDetalleIdAndTipoOrderByFechaCambioDescIdDesc(
             Long pedidoDetalleId, TipoMovimientoDetalle tipo);
+
+    /** Último paso a una etapa (ej. a Entregado, para saber a cuál vuelve la línea si se anula la remisión). */
+    @EntityGraph(attributePaths = "estadoAnterior")
+    Optional<HistorialEstadoDetalle> findFirstByPedidoDetalleIdAndEstadoIdOrderByFechaCambioDescIdDesc(
+            Long pedidoDetalleId, Integer estadoId);
 }

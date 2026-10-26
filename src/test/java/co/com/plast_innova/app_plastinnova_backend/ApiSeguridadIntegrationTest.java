@@ -145,7 +145,7 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                 .andExpect(jsonPath("$.email").value(OPERADOR))
                 .andExpect(jsonPath("$.nombreCompleto").isNotEmpty())
                 .andExpect(jsonPath("$.roles", contains("OPERADOR")))
-                .andExpect(jsonPath("$.permisos", contains("detalle:cambiar-estado", "pedido:ver")));
+                .andExpect(jsonPath("$.permisos", contains("detalle:cambiar-estado", "pedido:ver", "produccion:ver")));
 
         // /auth/me y /auth/contrasena no son públicos como /auth/login
         mvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized());
@@ -197,7 +197,8 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
         mvc.perform(conToken(get("/api/v1/pedidos/{id}", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/auth/me"), GERENTE))
-                .andExpect(jsonPath("$.permisos", contains("inventario:ver", "kpi:ver", "material:ver", "pedido:ver")));
+                .andExpect(jsonPath("$.permisos", contains("entrega:ver", "inventario:ver", "kpi:ver", "material:ver",
+                        "pedido:ver", "produccion:ver")));
         mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), GERENTE))
                 .andExpect(status().isOk());
         mvc.perform(conToken(get("/api/v1/pedidos/{id}/materiales", pedidoId), OPERADOR))
@@ -219,6 +220,18 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                 .andExpect(status().isForbidden());
         mvc.perform(conToken(put("/api/v1/pedidos/{id}/reservas/{detalleId}", pedidoId, detalleId), GERENTE)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"cantidad\": 1}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(get("/api/v1/ordenes-produccion"), GERENTE))
+                .andExpect(status().isOk());
+        mvc.perform(conToken(post("/api/v1/ordenes-produccion"), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"itemCodigo\": \"X\", \"cantidad\": 1}"))
+                .andExpect(status().isForbidden());
+        // Puede consultar las entregas: responde 409 solo porque esta prueba no carga la bodega de producto terminado
+        mvc.perform(conToken(get("/api/v1/pedidos/{id}/entregas", pedidoId), GERENTE))
+                .andExpect(status().isConflict());
+        mvc.perform(conToken(post("/api/v1/pedidos/{id}/remisiones", pedidoId), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lineas\": [{\"detalleId\": %d, \"cantidad\": 1}]}".formatted(detalleId)))
                 .andExpect(status().isForbidden());
 
         mvc.perform(conToken(put("/api/v1/pedidos/{id}/estado", pedidoId), GERENTE)
@@ -330,6 +343,14 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                         .content("{\"codigo\": \"IT_X\", \"nombre\": \"IT X\", \"ordenLogico\": 9}"))
                 .andExpect(status().isForbidden());
         mvc.perform(conToken(post("/api/v1/sincronizacion/filemaker/ejecuciones"), OPERADOR))
+                .andExpect(status().isForbidden());
+        // Ve las órdenes de producción (reporta su avance) pero no las crea ni hace remisiones
+        mvc.perform(conToken(get("/api/v1/ordenes-produccion"), OPERADOR))
+                .andExpect(status().isOk());
+        mvc.perform(conToken(post("/api/v1/ordenes-produccion"), OPERADOR)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"itemCodigo\": \"X\", \"cantidad\": 1}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(get("/api/v1/remisiones"), OPERADOR))
                 .andExpect(status().isForbidden());
 
         // El cambio rechazado no tocó el pedido

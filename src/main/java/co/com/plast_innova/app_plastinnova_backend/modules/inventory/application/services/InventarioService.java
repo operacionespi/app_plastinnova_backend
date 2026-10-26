@@ -14,7 +14,6 @@ import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositorie
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Bodega;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Item;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.repositories.ItemRepository;
-import co.com.plast_innova.app_plastinnova_backend.modules.order.domain.PedidoDetalle;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.Decimales;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.FechaUtc;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.Texto;
@@ -29,6 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -121,24 +123,48 @@ public class InventarioService {
     }
 
     /**
-     * Salida de lo que una línea de pedido tenía comprometido (despacho, corrección de lo producido). Quien la llama ya
-     * bloqueó el ítem y redujo la reserva de la línea (ver ReservaInventarioService).
+     * Salida automática de un slot (despacho, remisión, consumo de una orden). Si la referencia es una línea de pedido,
+     * quien llama ya bloqueó el ítem y redujo su reserva o verificó lo libre (ver ReservaInventarioService).
      */
-    MovimientoInventario salidaDePedido(Item item, Slot origen, BigDecimal cantidad, PedidoDetalle detalle,
+    public MovimientoInventario salida(Item item, Slot origen, BigDecimal cantidad, ReferenciaMovimiento referencia,
+                                       String motivo, String usuario) {
+        return mover(TipoMovimientoInventario.SALIDA, item, origen, null, cantidad, null, motivo,
+                referencia.observaciones(), usuario, referencia);
+    }
+
+    /** Entrada automática a un slot: lo producido, o lo que devuelve una remisión anulada. */
+    public MovimientoInventario entrada(Item item, Slot destino, BigDecimal cantidad, ReferenciaMovimiento referencia,
                                         String motivo, String usuario) {
-        return mover(TipoMovimientoInventario.SALIDA, item, origen, null, cantidad, null, motivo, referencia(detalle),
-                usuario, detalle);
+        return mover(TipoMovimientoInventario.ENTRADA, item, null, destino, cantidad, null, motivo,
+                referencia.observaciones(), usuario, referencia);
     }
 
-    /** Entrada de lo producido para una línea de pedido (ver ReservaInventarioService.recibirProduccion). */
-    MovimientoInventario entradaDePedido(Item item, Slot destino, BigDecimal cantidad, PedidoDetalle detalle,
-                                         String motivo, String usuario) {
-        return mover(TipoMovimientoInventario.ENTRADA, item, null, destino, cantidad, null, motivo, referencia(detalle),
-                usuario, detalle);
+    /**
+     * Saca la cantidad de los slots de la bodega: primero del preferido y luego de los de más saldo. Si no alcanza sale
+     * lo que haya y retorna lo que faltó (quien llama decide si es un error).
+     */
+    public BigDecimal sacarDeBodega(Item item, Bodega bodega, BigDecimal cantidad, Slot preferido,
+                                    ReferenciaMovimiento referencia, String motivo, String usuario) {
+        BigDecimal pendiente = cantidad;
+        List<Existencia> saldos = new ArrayList<>(existenciaRepository.bloquearEnBodega(item.getId(), bodega.getId()));
+        if (preferido != null) {
+            saldos.sort(Comparator.comparing(e -> !e.getSlot().getId().equals(preferido.getId())));
+        }
+        for (Existencia e : saldos) {
+            if (pendiente.signum() <= 0) {
+                break;
+            }
+            BigDecimal sale = pendiente.min(e.getCantidad());
+            salida(item, e.getSlot(), sale, referencia, motivo, usuario);
+            pendiente = pendiente.subtract(sale);
+        }
+        return pendiente.max(BigDecimal.ZERO);
     }
 
-    private static String referencia(PedidoDetalle detalle) {
-        return "Pedido " + detalle.getPedido().getNumeroPedido() + ", línea " + detalle.getPosicion();
+    /** Existencia del ítem en la bodega menos lo comprometido por los pedidos (puede ser negativa tras un conteo). */
+    public BigDecimal libre(Integer itemId, Integer bodegaId) {
+        return existenciaRepository.totalEnBodega(itemId, bodegaId)
+                .subtract(reservaRepository.totalReservado(itemId, bodegaId, null));
     }
 
     private MovimientoInventario mover(TipoMovimientoInventario tipo, Item item, Slot origen, Slot destino,
@@ -149,10 +175,10 @@ public class InventarioService {
 
     private MovimientoInventario mover(TipoMovimientoInventario tipo, Item item, Slot origen, Slot destino,
                                        BigDecimal cantidad, BigDecimal contada, String motivo, String observaciones,
-                                       String usuario, PedidoDetalle detalle) {
+                                       String usuario, ReferenciaMovimiento referencia) {
         LocalDateTime ahora = FechaUtc.ahora();
-        // Los movimientos de un pedido sacan lo que su línea tenía comprometido (su reserva ya se redujo)
-        if (detalle == null && sacaDeLaBodega(tipo, origen, destino)) {
+        // Los movimientos de una línea sacan lo que tenía comprometido (su reserva ya se redujo)
+        if ((referencia == null || !referencia.esDeLinea()) && sacaDeLaBodega(tipo, origen, destino)) {
             respetarReservas(tipo, item, origen.getBodega(), cantidad);
         }
         if (origen != null) {
@@ -193,7 +219,9 @@ public class InventarioService {
                 .observaciones(observaciones)
                 .usuario(usuario)
                 .fecha(ahora)
-                .pedidoDetalle(detalle)
+                .pedidoDetalle(referencia == null ? null : referencia.detalle())
+                .ordenProduccion(referencia == null ? null : referencia.orden())
+                .remision(referencia == null ? null : referencia.remision())
                 .build());
     }
 

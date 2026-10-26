@@ -344,9 +344,10 @@ class IndicadoresIntegrationTest extends PruebaIntegracion {
 
         Page<LineaColaDTO> pagina = colaTrabajo.buscar(new FiltroLineaRequestDTO(null, null, null, null, null), PageRequest.of(0, 10));
 
-        // Una sola consulta (línea + pedido + cliente + producto + estado); sin conteo porque la página no se llenó.
+        // Una consulta (línea + pedido + cliente + producto + estado) y otra por las órdenes de producción de la
+        // página; sin conteo porque la página no se llenó.
         // Fuera: L1 (pedido IT-A cerrado), L2 (eliminada en FileMaker) y L5 (pedido IT-D eliminado)
-        assertEquals(1, estadisticas.getPrepareStatementCount());
+        assertEquals(2, estadisticas.getPrepareStatementCount());
         assertEquals(List.of("IT-B", "IT-C"), pagina.map(LineaColaDTO::numeroPedido).toList());
         LineaColaDTO l3 = pagina.getContent().getFirst();
         assertEquals("ALMACEN1", l3.estadoActual().codigo());

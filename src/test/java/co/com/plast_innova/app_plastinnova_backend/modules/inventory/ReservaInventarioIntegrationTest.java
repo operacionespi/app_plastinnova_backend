@@ -1,5 +1,9 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.inventory;
 
+import co.com.plast_innova.app_plastinnova_backend.modules.delivery.application.dto.LineaRemisionRequestDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.delivery.application.dto.RemisionDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.delivery.application.dto.RemisionRequestDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.delivery.application.services.RemisionService;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.dto.EstadoCompromiso;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.dto.ExistenciaDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.dto.MovimientoDTO;
@@ -75,6 +79,7 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
     @Autowired private InventarioService inventarioService;
     @Autowired private ReservaInventarioService reservaService;
     @Autowired private PedidoService pedidoService;
+    @Autowired private RemisionService remisionService;
     @Autowired private JdbcTemplate jdbc;
 
     private int a1;
@@ -96,7 +101,8 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
 
     @AfterEach
     void limpiar() {
-        for (String tabla : List.of("Reserva_Inventario", "Movimiento_Inventario", "Historial_Estado_Detalle",
+        for (String tabla : List.of("Reserva_Inventario", "Movimiento_Inventario", "Remision_Linea", "Remision",
+                "Historial_Estado_Detalle",
                 "Historial_Estado_Pedido", "Pedido_Detalle", "Pedido", "Cliente", "Producto", "Existencia", "Slot",
                 "Lista_Material", "Item", "Bodega", "Carga_Lista_Materiales")) {
             jdbc.update("DELETE FROM " + tabla);
@@ -164,7 +170,7 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
     }
 
     @Test
-    void alEntregarLaLineaSaleLoComprometidoYNoSaleLoLibera() {
+    void laRemisionSacaPrimeroLoComprometidoYNoSaleLoLibera() {
         mover(ENTRADA, null, a1, "6");
         mover(ENTRADA, null, a2, "4");
         long p1 = pedido("IT-P1");
@@ -174,28 +180,37 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
         reservaService.reservar(p1, l1, new BigDecimal("9"), USUARIO);
         reservaService.reservar(p2, l2, new BigDecimal("1"), USUARIO);
 
-        // Entrega 7 piezas: salen del slot con más saldo primero; las otras 2 reservadas quedan libres
-        jdbc.update("UPDATE Pedido_Detalle SET estado_actual_id = ? WHERE id = ?", estado("ALMACEN1"), l1);
-        pedidoService.transicionarEstadoDetalle(l1, new CambioEstadoDetalleRequestDTO(estado("ENTREGADO"), 7, null), USUARIO);
+        // Entrega 7 piezas: salen del slot con más saldo primero; quedan 2 comprometidas para las 3 que faltan
+        RemisionDTO remision = entregar(p1, l1, 7);
         assertEquals(Map.of("A-02", new BigDecimal("3")), saldos());
         List<MovimientoDTO> salidas = inventarioService.movimientos("IT-PT1", null, TipoMovimientoInventario.SALIDA,
                 PageRequest.of(0, 10)).getContent();
         assertEquals(List.of(new BigDecimal("1"), new BigDecimal("6")), salidas.stream().map(MovimientoDTO::cantidad).toList());
         assertEquals("IT-P1", salidas.getFirst().numeroPedido());
-        assertEquals("Despacho", salidas.getFirst().motivo());
-        ReservasPedidoDTO entregado = reservaService.reservasPedido(p1);
-        assertEquals(BigDecimal.ZERO, entregado.lineas().getFirst().reservada());
-        assertEquals("La línea ya está en Entregado.", entregado.lineas().getFirst().motivoNoReservable());
-        assertEquals(EstadoCompromiso.NO_APLICA, entregado.estado());
+        assertEquals(remision.numero(), salidas.getFirst().numeroRemision());
+        assertEquals("Entrega", salidas.getFirst().motivo());
+        ReservaLineaDTO parcial = reservaService.reservasPedido(p1).lineas().getFirst();
+        assertEquals(new BigDecimal("2"), parcial.reservada());
+        assertEquals(7, parcial.cantidadEntregada());
+        assertEquals(new BigDecimal("2"), parcial.maximoReservable());
 
-        // No sale: lo comprometido vuelve a quedar libre
+        // Lo que falta no puede tomar la unidad comprometida para el otro pedido
+        BusinessRuleException sinProducto = assertThrows(BusinessRuleException.class, () -> entregar(p1, l1, 3));
+        assertTrue(sinProducto.getMessage().contains("solo hay 2 disponibles en 1A001"), sinProducto.getMessage());
+
+        // No sale: lo comprometido vuelve a quedar libre y completa la entrega
         pedidoService.marcarNoSale(l2, new JustificacionRequestDTO("Cliente canceló la referencia"), USUARIO);
+        entregar(p1, l1, 3);
+        assertEquals(Map.of(), saldos());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM Reserva_Inventario", Integer.class));
-        mover(SALIDA, a2, null, "3");
+        ReservaLineaDTO entregada = reservaService.reservasPedido(p1).lineas().getFirst();
+        assertEquals("Entregado", entregada.estadoLinea());
+        assertEquals("La línea ya está en Entregado.", entregada.motivoNoReservable());
+        assertEquals(EstadoCompromiso.NO_APLICA, reservaService.reservasPedido(p1).estado());
     }
 
     @Test
-    void loProducidoEntraComprometidoAlLlegarAAlmacenYSaleAlEntregar() {
+    void loProducidoEntraComprometidoAlLlegarAAlmacenYSaleConLaRemision() {
         long p1 = pedido("IT-P1");
         long l1 = linea(p1, 1, "IT-PT1", 10);
         jdbc.update("UPDATE Pedido_Detalle SET estado_actual_id = ?, cantidad_procesada = 8, avance_reportado = 1 WHERE id = ?",
@@ -216,7 +231,11 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
         assertEquals(Map.of("PRODUCCION", new BigDecimal("6")), saldos());
         assertEquals(new BigDecimal("6"), reservaService.reservasPedido(p1).lineas().getFirst().reservada());
 
-        pedidoService.transicionarEstadoDetalle(l1, new CambioEstadoDetalleRequestDTO(estado("ENTREGADO"), 6, null), USUARIO);
+        // Entregado ya no se marca a mano: llega con las remisiones
+        BusinessRuleException manual = assertThrows(BusinessRuleException.class, () -> pedidoService
+                .transicionarEstadoDetalle(l1, new CambioEstadoDetalleRequestDTO(estado("ENTREGADO"), 6, null), USUARIO));
+        assertTrue(manual.getMessage().contains("cuando sus remisiones completan lo solicitado"), manual.getMessage());
+        entregar(p1, l1, 6);
         assertEquals(Map.of(), saldos());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM Reserva_Inventario", Integer.class));
     }
@@ -256,6 +275,11 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
         reservaService.liberarLineasEliminadas();
         assertEquals(List.of(l1), jdbc.queryForList("SELECT pedido_detalle_id FROM Reserva_Inventario", Long.class));
         assertEquals(new BigDecimal("4"), reservaService.reservasPedido(p1).lineas().getFirst().libre());
+    }
+
+    private RemisionDTO entregar(long pedidoId, long detalleId, int cantidad) {
+        return remisionService.emitir(pedidoId, new RemisionRequestDTO(null, null, null,
+                List.of(new LineaRemisionRequestDTO(detalleId, cantidad))), USUARIO);
     }
 
     private MovimientoDTO mover(TipoMovimientoInventario tipo, Integer origen, Integer destino, String cantidad) {

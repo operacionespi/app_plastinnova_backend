@@ -28,6 +28,20 @@ public interface PedidoDetalleRepository extends JpaRepository<PedidoDetalle, Lo
     @EntityGraph(attributePaths = {"producto", "estadoActual"})
     List<PedidoDetalle> findByPedidoIdAndEliminadoEnFmFalse(Long pedidoId);
 
+    /**
+     * Líneas sin terminar de pedidos abiertos que piden el producto (por SKU, o por el código de FileMaker si no tiene):
+     * las que puede atender una orden de producción. Primero las de entrega más próxima.
+     */
+    @EntityGraph(attributePaths = {"pedido", "pedido.cliente", "producto", "estadoActual"})
+    @Query("""
+        SELECT d FROM PedidoDetalle d
+        WHERE (d.producto.sku = :codigo OR (d.producto.sku IS NULL AND d.producto.filemakerId = :codigo))
+          AND d.eliminadoEnFm = false AND d.pedido.eliminadoEnFm = false AND d.pedido.fechaCierre IS NULL
+          AND d.estadoActual.esFinal = false
+        ORDER BY d.pedido.fechaEstimadaEntrega ASC NULLS LAST, d.pedido.numeroPedido, d.posicion
+    """)
+    List<PedidoDetalle> pendientesDeProducto(@Param("codigo") String codigo);
+
     /** Líneas vigentes del pedido que no están en el estado indicado (0 = todas están en él). */
     long countByPedidoIdAndEliminadoEnFmFalseAndEstadoActualIdNot(Long pedidoId, Integer estadoId);
 

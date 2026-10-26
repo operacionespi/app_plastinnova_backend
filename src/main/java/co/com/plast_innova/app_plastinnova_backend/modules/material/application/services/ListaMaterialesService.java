@@ -4,6 +4,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.Estado
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ExistenciaRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ReservaInventarioRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.CargaListaMaterialesDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.ComponenteDirectoDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.ItemResumenDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.LineaMaterialesDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.MaterialesPedidoDTO;
@@ -35,6 +36,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -78,6 +80,18 @@ public class ListaMaterialesService {
         ItemBom item = e.item(codigo)
                 .orElseThrow(() -> new ResourceNotFoundException("El ítem " + codigo + " no existe en la lista de materiales."));
         return e.explotar(item, cantidad);
+    }
+
+    /** Componentes del primer nivel del ítem (vacío si no tiene lista de materiales o no está en ella). */
+    public List<ComponenteDirectoDTO> componentesDirectos(String codigo) {
+        EstructuraMateriales e = estructura();
+        return e.item(codigo).map(e::componentesDirectos).orElse(List.of());
+    }
+
+    /** Bodega donde la lista de materiales consume el ítem como componente (la más usada). */
+    public Optional<String> bodegaDeConsumo(String codigo) {
+        EstructuraMateriales e = estructura();
+        return e.item(codigo).flatMap(e::bodegaDeConsumo);
     }
 
     @Transactional(readOnly = true)

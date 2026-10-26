@@ -23,6 +23,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.Hi
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.HistorialEstadoPedidoRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoDetalleRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.repositories.PedidoRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.production.repositories.OrdenProduccionLineaRepository;
 import co.com.plast_innova.app_plastinnova_backend.shared.domain.OrigenCambio;
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.BusinessRuleException;
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.ResourceNotFoundException;
@@ -65,6 +66,7 @@ class PedidoServiceTest {
     @Mock private PedidoMapper pedidoMapper;
     @Mock private ReservaInventarioService reservas;
     @Mock private AlmacenProductoTerminado almacen;
+    @Mock private OrdenProduccionLineaRepository ordenLineaRepository;
 
     @InjectMocks
     private PedidoServiceImpl pedidoService;

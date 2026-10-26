@@ -29,5 +29,8 @@ public record LineaColaDTO(
         Boolean esAnexo,
         LocalDateTime fechaCreacionFm,
         LocalDate fechaEstimadaEntrega,
-        boolean atrasado
+        boolean atrasado,
+        /** Orden de producción que la línea sigue: su avance se reporta en la orden. null si no tiene. */
+        String ordenProduccion,
+        Long ordenProduccionId
 ) {}

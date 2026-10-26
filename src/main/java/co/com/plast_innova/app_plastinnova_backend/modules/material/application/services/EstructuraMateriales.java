@@ -1,5 +1,6 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.material.application.services;
 
+import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.ComponenteDirectoDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.NodoMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.dto.TotalMaterialDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.TipoItem;
@@ -58,6 +59,26 @@ final class EstructuraMateriales {
     /** Busca por código sin importar mayúsculas ni espacios al inicio/fin, igual que SQL Server. */
     Optional<ItemBom> item(String codigo) {
         return codigo == null ? Optional.empty() : Optional.ofNullable(porCodigo.get(clave(codigo)));
+    }
+
+    /** Primer nivel de la estructura del ítem, en el orden de su secuencia. */
+    List<ComponenteDirectoDTO> componentesDirectos(ItemBom item) {
+        return componentes.getOrDefault(item.id(), List.of()).stream().map(c -> {
+            ItemBom hijo = porId.get(c.itemHijoId());
+            return new ComponenteDirectoDTO(hijo.id(), hijo.codigo(), hijo.descripcion(), hijo.tipo(), hijo.unidad(),
+                    c.bodega(), c.cantidad());
+        }).toList();
+    }
+
+    /** Bodega en la que más ítems padres consumen este ítem; vacío si no es componente de nadie. */
+    Optional<String> bodegaDeConsumo(ItemBom item) {
+        Map<String, Long> usos = new HashMap<>();
+        componentes.values().forEach(lista -> lista.stream()
+                .filter(c -> c.itemHijoId() == item.id() && c.bodega() != null)
+                .forEach(c -> usos.merge(c.bodega(), 1L, Long::sum)));
+        return usos.entrySet().stream()
+                .max(Map.Entry.<String, Long>comparingByValue().thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey);
     }
 
     boolean tieneComponentes(ItemBom item) {
