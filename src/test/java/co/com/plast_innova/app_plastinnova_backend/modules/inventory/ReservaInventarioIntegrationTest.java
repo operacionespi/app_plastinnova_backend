@@ -15,6 +15,8 @@ import co.com.plast_innova.app_plastinnova_backend.modules.material.application.
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.CargaListaMaterialesService;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.application.services.ListaMaterialesService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoDetalleRequestDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoPedidoRequestDTO;
+import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CorreccionCantidadRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.JustificacionRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.services.PedidoService;
 import co.com.plast_innova.app_plastinnova_backend.shared.exception.BusinessRuleException;
@@ -193,6 +195,56 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
     }
 
     @Test
+    void loProducidoEntraComprometidoAlLlegarAAlmacenYSaleAlEntregar() {
+        long p1 = pedido("IT-P1");
+        long l1 = linea(p1, 1, "IT-PT1", 10);
+        jdbc.update("UPDATE Pedido_Detalle SET estado_actual_id = ?, cantidad_procesada = 8, avance_reportado = 1 WHERE id = ?",
+                estado("CALIDAD"), l1);
+
+        // Llegan 8 a Almacén 1: entran al slot de recepción (se crea) y quedan comprometidas para la línea
+        pedidoService.transicionarEstadoDetalle(l1, new CambioEstadoDetalleRequestDTO(estado("ALMACEN1"), 8, null), USUARIO);
+        assertEquals(Map.of("PRODUCCION", new BigDecimal("8")), saldos());
+        assertEquals(new BigDecimal("8"), reservaService.reservasPedido(p1).lineas().getFirst().reservada());
+        MovimientoDTO entrada = inventarioService.movimientos("IT-PT1", null, ENTRADA, PageRequest.of(0, 1)).getContent().getFirst();
+        assertEquals("Producción", entrada.motivo());
+        assertEquals("IT-P1", entrada.numeroPedido());
+        // Nadie más puede sacarlas
+        assertThrows(BusinessRuleException.class, () -> mover(SALIDA, slot("PRODUCCION"), null, "1"));
+
+        // Corregir a 6: salen 2 y lo comprometido baja
+        pedidoService.corregirCantidadDetalle(l1, new CorreccionCantidadRequestDTO(6, "Dos piezas llegaron rayadas"), USUARIO);
+        assertEquals(Map.of("PRODUCCION", new BigDecimal("6")), saldos());
+        assertEquals(new BigDecimal("6"), reservaService.reservasPedido(p1).lineas().getFirst().reservada());
+
+        pedidoService.transicionarEstadoDetalle(l1, new CambioEstadoDetalleRequestDTO(estado("ENTREGADO"), 6, null), USUARIO);
+        assertEquals(Map.of(), saldos());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM Reserva_Inventario", Integer.class));
+    }
+
+    @Test
+    void alFacturarSaleLoComprometidoYLosConteosNoBajanDeLoReservado() {
+        mover(ENTRADA, null, a1, "10");
+        long p1 = pedido("IT-P1");
+        linea(p1, 1, "IT-PT1", 5);
+        reservaService.comprometer(p1, USUARIO);
+
+        BusinessRuleException conteo = assertThrows(BusinessRuleException.class, () -> inventarioService.registrar(
+                new MovimientoRequestDTO(TipoMovimientoInventario.AJUSTE, "IT-PT1", null, a1, new BigDecimal("3"), null, null),
+                USUARIO));
+        assertTrue(conteo.getMessage().contains("el conteo dejaría 3 en la bodega: libere reservas"), conteo.getMessage());
+        inventarioService.registrar(new MovimientoRequestDTO(TipoMovimientoInventario.AJUSTE, "IT-PT1", null, a1,
+                new BigDecimal("7"), null, null), USUARIO);
+
+        jdbc.update("UPDATE Pedido SET estado_actual_id = (SELECT id FROM Estado_Pedido WHERE codigo = 'PARA_DESPACHAR') WHERE id = ?", p1);
+        int facturado = jdbc.queryForObject("SELECT id FROM Estado_Pedido WHERE codigo = 'FACTURADO'", Integer.class);
+        pedidoService.transicionarEstadoPedido(p1, new CambioEstadoPedidoRequestDTO(facturado, null), USUARIO);
+        assertEquals(Map.of("A-01", new BigDecimal("2")), saldos());
+        assertEquals("Despacho", inventarioService.movimientos("IT-PT1", null, SALIDA, PageRequest.of(0, 1))
+                .getContent().getFirst().motivo());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM Reserva_Inventario", Integer.class));
+    }
+
+    @Test
     void lasLineasEliminadasEnFileMakerOConMenosCantidadNoSostienenLaReserva() {
         mover(ENTRADA, null, a1, "10");
         long p1 = pedido("IT-P1");
@@ -236,6 +288,10 @@ class ReservaInventarioIntegrationTest extends PruebaIntegracion {
 
     private int estado(String codigo) {
         return jdbc.queryForObject("SELECT id FROM Estado_Detalle WHERE codigo = ?", Integer.class, codigo);
+    }
+
+    private int slot(String codigo) {
+        return jdbc.queryForObject("SELECT id FROM Slot WHERE codigo = ?", Integer.class, codigo);
     }
 
     private int bodega(String codigo) {

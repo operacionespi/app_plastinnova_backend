@@ -7,6 +7,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.dto.ReservasPedidoDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain.Existencia;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain.ReservaInventario;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.domain.Slot;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ExistenciaRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.repositories.ReservaInventarioRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.material.domain.Bodega;
@@ -40,8 +41,9 @@ import java.util.Optional;
  * slot) y por línea, nunca más de lo solicitado ni más de lo libre: la existencia menos lo que tienen los demás
  * pedidos. Cada operación bloquea el ítem, así que dos pedidos no comprometen las mismas unidades.
  *
- * <p>Ciclo de una reserva: la crea un usuario (Comprometer), se convierte en salida de inventario cuando la línea se
- * entrega (despachar) y se libera si la línea no sale, desaparece de FileMaker o el pedido se cierra.
+ * <p>Ciclo de una reserva: la crea un usuario (Comprometer) o la producción de la línea al llegar a la bodega
+ * (recibirProduccion); se convierte en salida de inventario cuando la línea se entrega o el pedido se factura
+ * (despachar), y se libera si la línea no sale o desaparece de FileMaker.
  */
 @Slf4j
 @Service
@@ -54,12 +56,12 @@ public class ReservaInventarioService {
     private final PedidoRepository pedidoRepository;
     private final PedidoDetalleRepository pedidoDetalleRepository;
     private final InventarioService inventarioService;
-    private final BodegaProductoTerminado bodegaProductoTerminado;
+    private final AlmacenProductoTerminado almacen;
 
     @Transactional(readOnly = true)
     public ReservasPedidoDTO reservasPedido(Long pedidoId) {
         Pedido pedido = pedido(pedidoId);
-        Bodega bodega = bodegaProductoTerminado.obtener();
+        Bodega bodega = almacen.obtener();
         Map<Long, ReservaInventario> reservas = new HashMap<>();
         reservaRepository.findByPedidoDetallePedidoId(pedidoId).forEach(r -> reservas.put(r.getPedidoDetalle().getId(), r));
         Map<Integer, Disponibilidad> disponibilidad = new HashMap<>();
@@ -124,7 +126,7 @@ public class ReservaInventarioService {
             throw new BusinessRuleException("No se pueden comprometer " + Decimales.paraMostrar(cantidad)
                     + ": la línea solicita " + detalle.getCantidadSolicitada() + ".");
         }
-        Bodega bodega = bodegaProductoTerminado.obtener();
+        Bodega bodega = almacen.obtener();
         Item bloqueado = itemRepository.bloquear(item.get().getId()).orElseThrow();
         BigDecimal libre = libreSinLinea(bloqueado, bodega, detalleId);
         if (cantidad.compareTo(libre) > 0) {
@@ -142,7 +144,7 @@ public class ReservaInventarioService {
     @Transactional
     public ReservasPedidoDTO comprometer(Long pedidoId, String usuario) {
         Pedido pedido = pedido(pedidoId);
-        Bodega bodega = bodegaProductoTerminado.obtener();
+        Bodega bodega = almacen.obtener();
         Map<Long, ReservaInventario> reservas = new HashMap<>();
         reservaRepository.findByPedidoDetallePedidoId(pedidoId).forEach(r -> reservas.put(r.getPedidoDetalle().getId(), r));
         for (PedidoDetalle d : lineas(pedidoId)) {
@@ -165,7 +167,7 @@ public class ReservaInventarioService {
     @Transactional
     public ReservasPedidoDTO liberar(Long pedidoId) {
         pedido(pedidoId);
-        liberarPedido(pedidoId);
+        reservaRepository.deleteAll(reservaRepository.findByPedidoDetallePedidoId(pedidoId));
         return reservasPedido(pedidoId);
     }
 
@@ -173,12 +175,6 @@ public class ReservaInventarioService {
     @Transactional
     public void liberarLinea(Long detalleId) {
         reservaRepository.findByPedidoDetalleId(detalleId).ifPresent(reservaRepository::delete);
-    }
-
-    /** El pedido se cerró: lo que quede comprometido vuelve a quedar libre. */
-    @Transactional
-    public void liberarPedido(Long pedidoId) {
-        reservaRepository.deleteAll(reservaRepository.findByPedidoDetallePedidoId(pedidoId));
     }
 
     /** Sincronización: las líneas que desaparecieron de FileMaker dejan de reservar. */
@@ -207,28 +203,107 @@ public class ReservaInventarioService {
 
     /**
      * La línea se entregó: sale del inventario lo comprometido (hasta las piezas entregadas), de los slots de la bodega
-     * con más saldo primero, y la reserva desaparece. Si un conteo dejó menos existencia que la reservada, sale lo que
-     * haya. Sin reserva no se mueve nada: la línea se fabricó para el pedido.
+     * con más saldo primero, y la reserva desaparece. Lo producido para la línea ya está comprometido desde que llegó
+     * a la bodega (ver recibirProduccion).
      */
     @Transactional
     public void despachar(PedidoDetalle detalle, int entregadas, String usuario) {
         reservaRepository.findByPedidoDetalleId(detalle.getId()).ifPresent(reserva -> {
             reservaRepository.delete(reserva);
             Item item = itemRepository.bloquear(reserva.getItem().getId()).orElseThrow();
-            BigDecimal pendiente = reserva.getCantidad().min(BigDecimal.valueOf(entregadas));
-            for (Existencia e : existenciaRepository.bloquearEnBodega(item.getId(), reserva.getBodega().getId())) {
-                if (pendiente.signum() <= 0) {
-                    break;
-                }
-                BigDecimal sale = pendiente.min(e.getCantidad());
-                inventarioService.despachar(item, e.getSlot(), sale, detalle, usuario);
-                pendiente = pendiente.subtract(sale);
-            }
-            if (pendiente.signum() > 0) {
-                log.warn("Despacho de la línea {} del pedido {}: faltaron {} de {} en {}", detalle.getId(),
-                        detalle.getPedido().getNumeroPedido(), pendiente, item.getCodigo(), reserva.getBodega().getCodigo());
+            sacar(item, reserva.getBodega(), reserva.getCantidad().min(BigDecimal.valueOf(entregadas)), null, detalle,
+                    "Despacho", usuario);
+        });
+    }
+
+    /** El pedido se facturó: sale de la bodega todo lo que sus líneas tengan comprometido. */
+    @Transactional
+    public void despacharPedido(Long pedidoId, String usuario) {
+        reservaRepository.findByPedidoDetallePedidoId(pedidoId).forEach(r -> {
+            reservaRepository.delete(r);
+            Item item = itemRepository.bloquear(r.getItem().getId()).orElseThrow();
+            sacar(item, r.getBodega(), r.getCantidad(), null, r.getPedidoDetalle(), "Despacho", usuario);
+        });
+    }
+
+    /**
+     * La línea llegó a la etapa de almacén con las piezas producidas: entran al slot de recepción de la bodega de
+     * producto terminado y quedan comprometidas para la línea (hasta lo solicitado). Si el producto no está en el
+     * maestro de ítems no se mueve nada.
+     */
+    @Transactional
+    public void recibirProduccion(PedidoDetalle detalle, int piezas, String usuario) {
+        if (piezas <= 0) {
+            return;
+        }
+        Optional<Item> encontrado = item(detalle);
+        if (encontrado.isEmpty()) {
+            log.warn("Línea {} del pedido {}: {} no está en el maestro de ítems; lo producido no entra al inventario",
+                    detalle.getId(), detalle.getPedido().getNumeroPedido(), sku(detalle));
+            return;
+        }
+        Bodega bodega = almacen.obtener();
+        Item item = itemRepository.bloquear(encontrado.get().getId()).orElseThrow();
+        BigDecimal cantidad = BigDecimal.valueOf(piezas);
+        inventarioService.entradaDePedido(item, almacen.slotRecepcion(bodega), cantidad, detalle, "Producción", usuario);
+        ReservaInventario actual = reservaRepository.findByPedidoDetalleId(detalle.getId()).orElse(null);
+        BigDecimal reservada = actual == null ? BigDecimal.ZERO : actual.getCantidad();
+        guardar(actual, detalle, item, bodega, reservada.add(cantidad)
+                .min(BigDecimal.valueOf(detalle.getCantidadSolicitada())), usuario);
+    }
+
+    /**
+     * Se corrigieron las piezas de una línea que ya está en la etapa de almacén: entra la diferencia, o sale (primero
+     * del slot de recepción) y se descuenta de lo comprometido.
+     */
+    @Transactional
+    public void corregirProduccion(PedidoDetalle detalle, int anterior, int nueva, String usuario) {
+        if (nueva > anterior) {
+            recibirProduccion(detalle, nueva - anterior, usuario);
+            return;
+        }
+        Optional<ReservaInventario> reserva = reservaRepository.findByPedidoDetalleId(detalle.getId());
+        Optional<Item> encontrado = item(detalle);
+        if (nueva == anterior || encontrado.isEmpty()) {
+            return;
+        }
+        Bodega bodega = almacen.obtener();
+        Item item = itemRepository.bloquear(encontrado.get().getId()).orElseThrow();
+        BigDecimal sobra = BigDecimal.valueOf(anterior - nueva);
+        reserva.ifPresent(r -> {
+            BigDecimal queda = r.getCantidad().subtract(sobra);
+            if (queda.signum() > 0) {
+                r.setCantidad(queda);
+            } else {
+                reservaRepository.delete(r);
             }
         });
+        sacar(item, bodega, sobra, almacen.slotRecepcion(bodega), detalle, "Corrección de producción", usuario);
+    }
+
+    /**
+     * Saca la cantidad de los slots de la bodega: primero del preferido y luego de los de más saldo. Si no alcanza
+     * (no debería: lo comprometido no se puede sacar por otra vía) sale lo que haya.
+     */
+    private void sacar(Item item, Bodega bodega, BigDecimal cantidad, Slot preferido, PedidoDetalle detalle,
+                       String motivo, String usuario) {
+        BigDecimal pendiente = cantidad;
+        List<Existencia> saldos = new ArrayList<>(existenciaRepository.bloquearEnBodega(item.getId(), bodega.getId()));
+        if (preferido != null) {
+            saldos.sort(Comparator.comparing(e -> !e.getSlot().getId().equals(preferido.getId())));
+        }
+        for (Existencia e : saldos) {
+            if (pendiente.signum() <= 0) {
+                break;
+            }
+            BigDecimal sale = pendiente.min(e.getCantidad());
+            inventarioService.salidaDePedido(item, e.getSlot(), sale, detalle, motivo, usuario);
+            pendiente = pendiente.subtract(sale);
+        }
+        if (pendiente.signum() > 0) {
+            log.warn("{} de la línea {} del pedido {}: faltaron {} de {} en {}", motivo, detalle.getId(),
+                    detalle.getPedido().getNumeroPedido(), pendiente, item.getCodigo(), bodega.getCodigo());
+        }
     }
 
     private BigDecimal libreSinLinea(Item item, Bodega bodega, Long detalleId) {

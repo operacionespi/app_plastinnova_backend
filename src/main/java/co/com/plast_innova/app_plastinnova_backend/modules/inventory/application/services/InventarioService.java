@@ -107,6 +107,8 @@ public class InventarioService {
      */
     Optional<MovimientoInventario> ajustar(TipoMovimientoInventario tipo, Item item, Slot slot, BigDecimal contada,
                                            String motivo, String observaciones, String usuario) {
+        // Ítem antes que saldo: un faltante revisa lo comprometido (ver respetarReservas) y debe bloquear en ese orden
+        itemRepository.bloquear(item.getId());
         BigDecimal saldo = existenciaRepository.bloquear(item.getId(), slot.getId())
                 .map(Existencia::getCantidad).orElse(BigDecimal.ZERO);
         BigDecimal diferencia = contada.subtract(saldo);
@@ -119,12 +121,24 @@ public class InventarioService {
     }
 
     /**
-     * Salida de lo despachado a una línea de pedido. Quien la llama ya bloqueó el ítem y liberó la reserva de la línea
-     * (ver ReservaInventarioService.despachar).
+     * Salida de lo que una línea de pedido tenía comprometido (despacho, corrección de lo producido). Quien la llama ya
+     * bloqueó el ítem y redujo la reserva de la línea (ver ReservaInventarioService).
      */
-    MovimientoInventario despachar(Item item, Slot origen, BigDecimal cantidad, PedidoDetalle detalle, String usuario) {
-        return mover(TipoMovimientoInventario.SALIDA, item, origen, null, cantidad, null, "Despacho",
-                "Pedido " + detalle.getPedido().getNumeroPedido() + ", línea " + detalle.getPosicion(), usuario, detalle);
+    MovimientoInventario salidaDePedido(Item item, Slot origen, BigDecimal cantidad, PedidoDetalle detalle,
+                                        String motivo, String usuario) {
+        return mover(TipoMovimientoInventario.SALIDA, item, origen, null, cantidad, null, motivo, referencia(detalle),
+                usuario, detalle);
+    }
+
+    /** Entrada de lo producido para una línea de pedido (ver ReservaInventarioService.recibirProduccion). */
+    MovimientoInventario entradaDePedido(Item item, Slot destino, BigDecimal cantidad, PedidoDetalle detalle,
+                                         String motivo, String usuario) {
+        return mover(TipoMovimientoInventario.ENTRADA, item, null, destino, cantidad, null, motivo, referencia(detalle),
+                usuario, detalle);
+    }
+
+    private static String referencia(PedidoDetalle detalle) {
+        return "Pedido " + detalle.getPedido().getNumeroPedido() + ", línea " + detalle.getPosicion();
     }
 
     private MovimientoInventario mover(TipoMovimientoInventario tipo, Item item, Slot origen, Slot destino,
@@ -137,9 +151,9 @@ public class InventarioService {
                                        BigDecimal cantidad, BigDecimal contada, String motivo, String observaciones,
                                        String usuario, PedidoDetalle detalle) {
         LocalDateTime ahora = FechaUtc.ahora();
-        // Un despacho saca lo que la línea tenía comprometido (su reserva ya se liberó)
+        // Los movimientos de un pedido sacan lo que su línea tenía comprometido (su reserva ya se redujo)
         if (detalle == null && sacaDeLaBodega(tipo, origen, destino)) {
-            respetarReservas(item, origen.getBodega(), cantidad);
+            respetarReservas(tipo, item, origen.getBodega(), cantidad);
         }
         if (origen != null) {
             Existencia existencia = existenciaRepository.bloquear(item.getId(), origen.getId()).orElse(null);
@@ -184,27 +198,33 @@ public class InventarioService {
     }
 
     /**
-     * Las salidas y los traslados a otra bodega no pueden tomar lo que los pedidos tienen comprometido. Los ajustes
-     * por conteo sí lo afectan: registran lo que hay físicamente.
+     * Nada deja la bodega por debajo de lo que los pedidos tienen comprometido: ni las salidas, ni los traslados a otra
+     * bodega, ni los conteos con faltante (hay que liberar reservas antes de ajustar).
      */
     private static boolean sacaDeLaBodega(TipoMovimientoInventario tipo, Slot origen, Slot destino) {
-        return (tipo == TipoMovimientoInventario.SALIDA || tipo == TipoMovimientoInventario.TRASLADO)
-                && (destino == null || !destino.getBodega().getId().equals(origen.getBodega().getId()));
+        return origen != null && (destino == null || !destino.getBodega().getId().equals(origen.getBodega().getId()));
     }
 
-    private void respetarReservas(Item item, Bodega bodega, BigDecimal cantidad) {
+    private void respetarReservas(TipoMovimientoInventario tipo, Item item, Bodega bodega, BigDecimal cantidad) {
         // El bloqueo del ítem va antes que el de los saldos, en el mismo orden que al reservar y despachar
         itemRepository.bloquear(item.getId());
         BigDecimal reservado = reservaRepository.totalReservado(item.getId(), bodega.getId(), null);
         if (reservado.signum() == 0) {
             return;
         }
-        BigDecimal libre = existenciaRepository.totalEnBodega(item.getId(), bodega.getId()).subtract(reservado);
-        if (libre.compareTo(cantidad) < 0) {
-            throw new BusinessRuleException("Hay " + Decimales.paraMostrar(reservado) + " de " + item.getCodigo()
-                    + " comprometidas para pedidos en " + bodega.getCodigo() + ": solo se pueden sacar "
-                    + Decimales.paraMostrar(libre.max(BigDecimal.ZERO)) + ".");
+        BigDecimal existencia = existenciaRepository.totalEnBodega(item.getId(), bodega.getId());
+        BigDecimal libre = existencia.subtract(reservado);
+        if (libre.compareTo(cantidad) >= 0) {
+            return;
         }
+        String comprometidas = "Hay " + Decimales.paraMostrar(reservado) + " de " + item.getCodigo()
+                + " comprometidas para pedidos en " + bodega.getCodigo();
+        if (tipo == TipoMovimientoInventario.AJUSTE || tipo == TipoMovimientoInventario.CARGA_INICIAL) {
+            throw new BusinessRuleException(comprometidas + " y el conteo dejaría "
+                    + Decimales.paraMostrar(existencia.subtract(cantidad)) + " en la bodega: libere reservas antes de ajustar.");
+        }
+        throw new BusinessRuleException(comprometidas + ": solo se pueden sacar "
+                + Decimales.paraMostrar(libre.max(BigDecimal.ZERO)) + ".");
     }
 
     private Slot slot(Integer id, String rol) {

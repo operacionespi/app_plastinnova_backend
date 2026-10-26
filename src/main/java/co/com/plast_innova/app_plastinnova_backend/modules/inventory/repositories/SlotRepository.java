@@ -22,5 +22,8 @@ public interface SlotRepository extends JpaRepository<Slot, Integer> {
 
     boolean existsByBodegaIdAndCodigo(Integer bodegaId, String codigo);
 
+    @EntityGraph(attributePaths = "bodega")
+    Optional<Slot> findByBodegaIdAndCodigo(Integer bodegaId, String codigo);
+
     boolean existsByBodegaIdAndCodigoAndIdNot(Integer bodegaId, String codigo, Integer id);
 }

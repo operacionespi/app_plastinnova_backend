@@ -8,6 +8,7 @@ import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.Estado
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.domain.EstadoPedido;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoDetalleRepository;
 import co.com.plast_innova.app_plastinnova_backend.modules.catalog.repositories.EstadoPedidoRepository;
+import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.AlmacenProductoTerminado;
 import co.com.plast_innova.app_plastinnova_backend.modules.inventory.application.services.ReservaInventarioService;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoDetalleRequestDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.CambioEstadoPedidoRequestDTO;
@@ -70,6 +71,7 @@ public class PedidoServiceImpl implements PedidoService {
     private final AuditoriaLogRepository auditoriaRepository;
     private final PedidoMapper pedidoMapper;
     private final ReservaInventarioService reservas;
+    private final AlmacenProductoTerminado almacen;
 
     @Override
     @Transactional(readOnly = true)
@@ -95,7 +97,8 @@ public class PedidoServiceImpl implements PedidoService {
         pedido.setEstadoActual(nuevoEstado);
         if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
             pedido.setFechaCierre(FechaUtc.ahora());
-            reservas.liberarPedido(pedido.getId());
+            // Facturado: lo que quede comprometido sale de la bodega de producto terminado
+            reservas.despacharPedido(pedido.getId(), emailOperador);
         } else if (Boolean.TRUE.equals(estadoAnterior.getEsFinal())) {
             // Reapertura (solo posible si se configuró una transición que sale del estado final)
             pedido.setFechaCierre(null);
@@ -184,11 +187,13 @@ public class PedidoServiceImpl implements PedidoService {
                 .observaciones(request.observaciones())
                 .build());
 
-        // Entregada: lo que tenía comprometido sale de la bodega de producto terminado
+        // Lo producido entra a la bodega de producto terminado comprometido para la línea; al entregarla, sale
         if (EstadoDetalle.CODIGO_NO_SALE.equals(nuevoEstado.getCodigo())) {
             reservas.liberarLinea(detalle.getId());
         } else if (Boolean.TRUE.equals(nuevoEstado.getEsFinal())) {
             reservas.despachar(detalle, request.cantidadProcesada(), emailOperador);
+        } else if (almacen.esRecepcion(nuevoEstado.getCodigo()) && !almacen.esRecepcion(estadoAnterior.getCodigo())) {
+            reservas.recibirProduccion(detalle, request.cantidadProcesada(), emailOperador);
         }
         return pedidoMapper.toDetalleResponseDTO(detalle);
     }
@@ -215,6 +220,9 @@ public class PedidoServiceImpl implements PedidoService {
 
         detalle.setCantidadProcesada(nueva);
         pedidoDetalleRepository.save(detalle);
+        if (almacen.esRecepcion(detalle.getEstadoActual().getCodigo())) {
+            reservas.corregirProduccion(detalle, anterior, nueva, emailUsuario);
+        }
 
         // Movimiento propio en el historial: misma etapa, cantidad antes y después, y la justificación
         historialDetalleRepository.save(HistorialEstadoDetalle.builder()
