@@ -13,7 +13,7 @@ public record ComponenteOrdenDTO(
         /** Bodega de donde se consume; null si la lista de materiales no la indica (no se consume). */
         String bodega,
         BigDecimal cantidadPorUnidad,
-        /** Para las piezas que puede reportar la etapa actual (o lo consumido, si la orden terminó). */
+        /** Para las piezas en proceso (o lo consumido por lo recibido y dado de baja, si el producto terminó). */
         BigDecimal requerido,
         /** Existencia en la bodega menos lo comprometido por pedidos. */
         BigDecimal libre,

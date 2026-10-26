@@ -47,11 +47,12 @@ public class HistorialOrdenProduccion {
     @JoinColumn(name = "etapa_anterior_id")
     private EstadoDetalle etapaAnterior;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "etapa_id", nullable = false)
+    /** Solo en el historial anterior a las entregas entre procesos (V18). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "etapa_id")
     private EstadoDetalle etapa;
 
-    /** Piezas reportadas (cambio de etapa) o cantidad de la orden (creación y edición). */
+    /** Piezas de la orden (creación y edición) o reportadas (cambios de etapa anteriores a V18). */
     @Column(name = "cantidad")
     private Integer cantidad;
 

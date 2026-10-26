@@ -42,6 +42,35 @@ public interface PedidoDetalleRepository extends JpaRepository<PedidoDetalle, Lo
     """)
     List<PedidoDetalle> pendientesDeProducto(@Param("codigo") String codigo);
 
+    /**
+     * Líneas de pedidos abiertos sin terminar, sin orden activa y con piezas por producir (sin lo comprometido ni lo
+     * entregado): de donde se crea una orden. Primero las de entrega más próxima. El texto filtra por pedido, cliente
+     * o producto.
+     */
+    @EntityGraph(attributePaths = {"pedido", "pedido.cliente", "producto", "estadoActual"})
+    @Query(value = """
+            SELECT d FROM PedidoDetalle d
+            WHERE d.eliminadoEnFm = false AND d.pedido.eliminadoEnFm = false AND d.pedido.fechaCierre IS NULL
+              AND d.estadoActual.esFinal = false
+              AND NOT EXISTS (SELECT 1 FROM OrdenProduccionLinea l WHERE l.pedidoDetalle = d AND l.activa = true)
+              AND d.cantidadSolicitada - d.cantidadEntregada > COALESCE(
+                    (SELECT SUM(r.cantidad) FROM ReservaInventario r WHERE r.pedidoDetalle = d), 0)
+              AND (:texto = '' OR d.pedido.numeroPedido LIKE CONCAT('%', :texto, '%')
+                   OR d.pedido.cliente.razonSocial LIKE CONCAT('%', :texto, '%')
+                   OR d.producto.sku LIKE CONCAT('%', :texto, '%') OR d.producto.nombre LIKE CONCAT('%', :texto, '%'))
+            ORDER BY d.pedido.fechaEstimadaEntrega ASC NULLS LAST, d.pedido.numeroPedido, d.posicion""",
+            countQuery = """
+            SELECT COUNT(d) FROM PedidoDetalle d
+            WHERE d.eliminadoEnFm = false AND d.pedido.eliminadoEnFm = false AND d.pedido.fechaCierre IS NULL
+              AND d.estadoActual.esFinal = false
+              AND NOT EXISTS (SELECT 1 FROM OrdenProduccionLinea l WHERE l.pedidoDetalle = d AND l.activa = true)
+              AND d.cantidadSolicitada - d.cantidadEntregada > COALESCE(
+                    (SELECT SUM(r.cantidad) FROM ReservaInventario r WHERE r.pedidoDetalle = d), 0)
+              AND (:texto = '' OR d.pedido.numeroPedido LIKE CONCAT('%', :texto, '%')
+                   OR d.pedido.cliente.razonSocial LIKE CONCAT('%', :texto, '%')
+                   OR d.producto.sku LIKE CONCAT('%', :texto, '%') OR d.producto.nombre LIKE CONCAT('%', :texto, '%'))""")
+    Page<PedidoDetalle> pendientesSinOrden(@Param("texto") String texto, Pageable pageable);
+
     /** Líneas vigentes del pedido que no están en el estado indicado (0 = todas están en él). */
     long countByPedidoIdAndEliminadoEnFmFalseAndEstadoActualIdNot(Long pedidoId, Integer estadoId);
 

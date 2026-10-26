@@ -1,6 +1,5 @@
 package co.com.plast_innova.app_plastinnova_backend.modules.production.application.dto;
 
-import co.com.plast_innova.app_plastinnova_backend.modules.order.application.dto.EstadoResponseDTO;
 import co.com.plast_innova.app_plastinnova_backend.modules.production.domain.EstadoOrdenProduccion;
 
 import java.time.LocalDate;
@@ -11,15 +10,13 @@ import java.util.List;
 public record OrdenProduccionResumenDTO(
         Long id,
         String numero,
-        String itemCodigo,
-        String itemDescripcion,
-        String unidad,
-        Integer cantidad,
-        /** Piezas reportadas por la última etapa (0 si aún no reporta). */
-        Integer cantidadProcesada,
         EstadoOrdenProduccion estado,
-        EstadoResponseDTO etapa,
-        String bodegaDestino,
+        List<ProductoResumenDTO> productos,
+        /** Suma de las piezas de sus productos. */
+        int cantidad,
+        int cantidadRecibida,
+        /** Piezas en cada proceso, sumando los productos (solo los procesos con piezas). */
+        List<EtapaProductoDTO> enProceso,
         LocalDate fechaRequerida,
         LocalDateTime fechaCreacion,
         LocalDateTime fechaCierre,

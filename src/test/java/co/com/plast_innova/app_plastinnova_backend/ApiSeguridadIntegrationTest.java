@@ -223,8 +223,13 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
                 .andExpect(status().isForbidden());
         mvc.perform(conToken(get("/api/v1/ordenes-produccion"), GERENTE))
                 .andExpect(status().isOk());
+        mvc.perform(conToken(get("/api/v1/rutas-produccion"), GERENTE))
+                .andExpect(status().isOk());
+        mvc.perform(conToken(post("/api/v1/rutas-produccion"), GERENTE)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"nombre\": \"X\", \"etapaIds\": [1]}"))
+                .andExpect(status().isForbidden());
         mvc.perform(conToken(post("/api/v1/ordenes-produccion"), GERENTE)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"itemCodigo\": \"X\", \"cantidad\": 1}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"productos\": [{\"itemCodigo\": \"X\", \"cantidad\": 1}]}"))
                 .andExpect(status().isForbidden());
         // Puede consultar las entregas: responde 409 solo porque esta prueba no carga la bodega de producto terminado
         mvc.perform(conToken(get("/api/v1/pedidos/{id}/entregas", pedidoId), GERENTE))
@@ -348,7 +353,11 @@ class ApiSeguridadIntegrationTest extends PruebaIntegracion {
         mvc.perform(conToken(get("/api/v1/ordenes-produccion"), OPERADOR))
                 .andExpect(status().isOk());
         mvc.perform(conToken(post("/api/v1/ordenes-produccion"), OPERADOR)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"itemCodigo\": \"X\", \"cantidad\": 1}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"productos\": [{\"itemCodigo\": \"X\", \"cantidad\": 1}]}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(conToken(post("/api/v1/ordenes-produccion/{id}/bajas", 1), OPERADOR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"productoId\": 1, \"etapaId\": 1, \"cantidad\": 1, \"motivo\": \"Rota\"}"))
                 .andExpect(status().isForbidden());
         mvc.perform(conToken(get("/api/v1/remisiones"), OPERADOR))
                 .andExpect(status().isForbidden());

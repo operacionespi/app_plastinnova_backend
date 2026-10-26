@@ -28,9 +28,6 @@ public interface OrdenProduccionLineaRepository extends JpaRepository<OrdenProdu
             FROM OrdenProduccionLinea l WHERE l.activa = true AND l.pedidoDetalle.id IN :detalleIds""")
     List<OrdenDeLinea> activasDe(@Param("detalleIds") Collection<Long> detalleIds);
 
-    @EntityGraph(attributePaths = {"orden", "orden.item"})
-    List<OrdenProduccionLinea> findByPedidoDetallePedidoIdOrderByIdDesc(Long pedidoId);
-
     interface OrdenDeLinea {
         Long getDetalleId();
 

@@ -34,13 +34,25 @@ public class OrdenProduccionLinea {
     private OrdenProduccion orden;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "orden_producto_id", nullable = false)
+    private OrdenProduccionProducto producto;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "pedido_detalle_id", nullable = false)
     private PedidoDetalle pedidoDetalle;
 
     @Column(name = "cantidad", nullable = false)
     private Integer cantidad;
 
-    /** La línea sigue las etapas de la orden; false al desvincularla o cuando la orden se cierra. */
+    /** Piezas que ya llegaron al almacén y quedaron comprometidas para la línea. */
+    @Column(name = "cantidad_recibida", nullable = false)
+    private Integer cantidadRecibida = 0;
+
+    /** La línea sigue las etapas del producto; false al desvincularla, al recibir todo o cuando el producto termina. */
     @Column(name = "activa", nullable = false)
     private Boolean activa = true;
+
+    public int pendiente() {
+        return Math.max(cantidad - cantidadRecibida, 0);
+    }
 }

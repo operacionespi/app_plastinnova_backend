@@ -13,7 +13,10 @@ public interface EstadoDetalleRepository extends EstadoCatalogoRepository<Estado
         SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM Pedido_Detalle WHERE estado_actual_id = :id)
                            OR EXISTS (SELECT 1 FROM Historial_Estado_Detalle
                                       WHERE estado_id = :id OR estado_anterior_id = :id)
-                           OR EXISTS (SELECT 1 FROM Orden_Produccion WHERE etapa_id = :id)
+                           OR EXISTS (SELECT 1 FROM Orden_Produccion_Etapa WHERE etapa_id = :id)
+                           OR EXISTS (SELECT 1 FROM Ruta_Produccion_Etapa WHERE etapa_id = :id)
+                           OR EXISTS (SELECT 1 FROM Entrega_Proceso
+                                      WHERE etapa_origen_id = :id OR etapa_destino_id = :id)
                            OR EXISTS (SELECT 1 FROM Historial_Orden_Produccion
                                       WHERE etapa_id = :id OR etapa_anterior_id = :id)
                     THEN 1 ELSE 0 END AS BIT)
